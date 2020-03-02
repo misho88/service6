@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+
+from pathlib import Path
+import argparse
+from subprocess import run, CalledProcessError
+from shlex import split
+from natsort import natsorted, ns
+from blessed import Terminal
+
+terminal = Terminal()
+
+SYMBOLS = {
+    'active': terminal.bright_green('✔ '),
+    'dead': terminal.bright_black('✘ '),
+    'unknown': terminal.bright_red('❓'),
+}
+
+ACTIVE = {
+    True: SYMBOLS['active'],
+    False: SYMBOLS['dead'],
+}
+
+def sh(cmd, capture_output=True, check=True, echo=False):
+    if echo:
+        print(terminal.bold_yellow('>>>'), terminal.bold(cmd))
+    return run(split(cmd), capture_output=capture_output, check=check)
+
+
+def sh_stdout(cmd):
+    return sh(cmd).stdout.decode().rstrip()
+
+
+def sh_list(cmd):
+    return natsorted(sh_stdout(cmd).split('\n'), alg=ns.IGNORECASE)
+
+
+path = Path(__file__)
+app = path.name
+
+def tabulate(results):
+    klen = max(terminal.length(k) for k in results)
+    ilen = max(terminal.length(i) for items in results.values() for i in items)
+    ilen += 1  # leave a gap
+
+    ncols = (terminal.width - klen) // ilen
+    for key, items in results.items():
+        nrows, rem = divmod(len(items), ncols)
+        nrows += rem != 0
+        for i in range(0, len(items), ncols):
+            if i == 0:
+                pad = '─' * (klen - terminal.length(key))
+                if len(pad) >= 2 and nrows > 1:
+                    pad = f'{pad[:-2]}┬─'
+                print(f'{key}{pad}', end='')
+            elif len(items) - i <= ncols:
+                print(f'{"╰─":>{klen}}', end='')
+            else:
+                print(f'{"├─":>{klen}}', end='')
+            for item in items[i:i + ncols]:
+                pad = terminal.bright_black('╌') * (ilen - terminal.length(item))
+                print(f'{pad}{item}', end='')
+            key = ''
+            print()
+
+
+def do_list(args):
+    bundles = sh_list("s6-rc-db list bundles")
+    services = sh_list("s6-rc-db list services")
+    active_services = sh_list("s6-rc -a list")
+    results = {}
+    for bundle_or_service in (args.items or bundles):
+        if bundle_or_service in bundles:
+            bundle = bundle_or_service
+            services = sh_list(f"s6-rc-bundle-update list {bundle}")
+            results[terminal.bold_yellow(bundle)] = [
+                f"{service} {ACTIVE[service in active_services]}"
+                for service in services
+            ]
+        elif bundle_or_service in services:
+            service = bundle_or_service
+            results.setdefault('', []).append(f"{service} {ACTIVE[service in active_services]}")
+        else:
+            results.setdefault('', []).append(f"{bundle_or_service} {SYMBOLS['unknown']}")
+    tabulate(results)
+
+
+def do_start(args):
+    services = " ".join(args.services)
+    res = sh(f's6-rc -u -v 2 change {services}', capture_output=False, echo=True)
+    # print(sh_stdout(f'{__file__} list {services}'))
+
+
+def do_stop(args):
+    services = " ".join(args.services)
+    sh(f's6-rc -d -v 2 change {services}', capture_output=False, echo=True)
+    # print(sh_stdout(f'{__file__} list {services}'))
+
+
+def do_restart(args):
+    do_stop(args)
+    do_start(args)
+
+
+def do_add(args):
+    services = " ".join(args.services)
+    bundle = args.bundle
+    bundles = sh_list("s6-rc-db list bundles")
+    if bundle in bundles:
+        sh(f's6-rc-bundle-update add {bundle} "{services}"', capture_output=False, echo=True)
+    else:
+        sh(f's6-rc-bundle add {bundle} {services}', capture_output=False, echo=True)
+
+
+def do_delete(args):
+    bundles = sh_list("s6-rc-db list bundles")
+
+    services = []
+    for service in args.services:
+        if service in bundles:
+            services += sh_list(f"s6-rc-bundle-update list {service}")
+        else:
+            services.append(service)
+    services_str = " ".join(services)
+    bundle = args.bundle
+    sh(f's6-rc-bundle-update delete {bundle} "{services_str}"', capture_output=False, echo=True)
+
+
+bundle_commands = {
+    'add': do_add,
+    'delete': do_delete,
+}
+
+service_commands = {
+    'start': do_start,
+    'stop': do_stop,
+    'restart': do_restart,
+    # 'log': not_implemented,
+}
+
+misc_commands = {
+    'list': do_list,
+}
+
+descriptions = {
+    'add': 'add services to a bundle',
+    'delete': 'delete services from a bundle',
+}
+
+commands = dict(
+    **bundle_commands,
+    **service_commands,
+    **misc_commands,
+)
+
+parser = argparse.ArgumentParser(prog=app, description=f'frontend to s6')
+subparsers = parser.add_subparsers(dest='command', required=True,
+    help=f'top-level command')
+
+for command in bundle_commands.keys():
+    subparser = subparsers.add_parser(command,
+        help=descriptions.get(command, 'bundle command'))
+    subparser.add_argument('--bundle', '-b', default='default',
+        help='the bundle to operate on (e.g., for add or delete)')
+    subparser.add_argument('services', nargs='+',
+        help='the service(s) to modify the bundle with')
+for command in service_commands.keys():
+    subparser = subparsers.add_parser(command,
+        help=descriptions.get(command, 'service command'))
+    subparser.add_argument('services', nargs='+',
+        help='the service(s) to operate on')
+for command in misc_commands.keys():
+    subparser = subparsers.add_parser(command,
+        help=descriptions.get(command, 'miscellaneous command'))
+    subparser.add_argument('items', nargs='*',
+        help='services or bundles')
+
+#parser.add_argument('items', nargs='*',
+#    help='which service to do it to')
+args = parser.parse_args()
+
+try:
+    commands[args.command](args)
+except CalledProcessError as e:
+    print(terminal.bright_red(str(e)))
+    if e.stdout:
+        print(e.stdout.decode())
+    if e.stderr:
+        print(terminal.red(e.stderr.decode()))
