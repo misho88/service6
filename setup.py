@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from setuptools import setup, find_packages
 from distutils.spawn import find_executable
 from pathlib import Path
