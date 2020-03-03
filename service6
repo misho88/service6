@@ -1,11 +1,49 @@
 #!/usr/bin/env python3
 
-from pathlib import Path
 import argparse
+from pathlib import Path
+
+path = Path(__file__)
+app = path.name
+parser = argparse.ArgumentParser(prog=app, description=f'frontend to s6')
+subparsers = parser.add_subparsers(dest='command', required=True,
+    help=f'top-level command')
+
+bundle_commands = ('add', 'delete')
+service_commands = ('start', 'stop', 'restart', 'log')
+misc_commands = ('list', 'help')
+
+descriptions = {
+    'add': 'add services to a bundle',
+    'delete': 'delete services from a bundle',
+}
+
+for command in bundle_commands:
+    subparser = subparsers.add_parser(command,
+        help=descriptions.get(command, 'bundle command'))
+    subparser.add_argument('--bundle', '-b', default='default',
+        help='the bundle to operate on (e.g., for add or delete)')
+    subparser.add_argument('services', nargs='+',
+        help='the service(s) to modify the bundle with')
+for command in service_commands:
+    subparser = subparsers.add_parser(command,
+        help=descriptions.get(command, 'service command'))
+    subparser.add_argument('services', nargs='+',
+        help='the service(s) to operate on')
+for command in misc_commands:
+    subparser = subparsers.add_parser(command,
+        help=descriptions.get(command, 'miscellaneous command'))
+    subparser.add_argument('items', nargs='*',
+        help='services or bundles')
+args = parser.parse_args()
+
+
 from subprocess import run, CalledProcessError
 from shlex import split
 from natsort import natsorted, ns
 from blessed import Terminal
+
+import service6doc as doc
 
 terminal = Terminal()
 
@@ -13,12 +51,16 @@ SYMBOLS = {
     'active': terminal.bright_green('✔ '),
     'dead': terminal.bright_black('✘ '),
     'unknown': terminal.bright_red('❓'),
+    'neutral': terminal.bright_red('  '),
+    'good': terminal.bright_green('✔ '),
+    'bad': terminal.bright_red('✘ '),
 }
 
 ACTIVE = {
     True: SYMBOLS['active'],
     False: SYMBOLS['dead'],
 }
+
 
 def sh(cmd, capture_output=True, check=True, echo=False):
     if echo:
@@ -33,9 +75,6 @@ def sh_stdout(cmd):
 def sh_list(cmd):
     return natsorted(sh_stdout(cmd).split('\n'), alg=ns.IGNORECASE)
 
-
-path = Path(__file__)
-app = path.name
 
 def tabulate(results):
     klen = max(terminal.length(k) for k in results)
@@ -125,6 +164,36 @@ def do_delete(args):
     sh(f's6-rc-bundle-update delete {bundle} "{services_str}"', capture_output=False, echo=True)
 
 
+def do_help(args):
+    if not args.items:
+        tabulate({ terminal.bold_green('Available'): doc.available })
+        print(terminal.bold_yellow(f"You can access {app}'s help with --help/-h."))
+        return
+    items = []
+    baditems = []
+    for item in args.items:
+        if item in doc.available:
+            items.append(item)
+        elif not item.startswith('s6-') and f's6-{item}' in doc.available:
+            items.append(f's6-{item}')
+        elif item not in baditems:
+            baditems.append(item)
+            if not item.startswith('s6-'):
+                baditems.append(f's6-{item}')
+    if baditems:
+        available = [
+            f'{item} {SYMBOLS["good" if item in items else "neutral"]}'
+            for item in doc.available
+        ]
+        baditems = [ f'{item} {SYMBOLS["bad"]}' for item in baditems ]
+        tabulate({
+            terminal.bold_green('Available'): available,
+            terminal.bold_red('Unavailable'): baditems,
+        })
+    else:
+        doc.show(*items)
+
+
 bundle_commands = {
     'add': do_add,
     'delete': do_delete,
@@ -139,11 +208,7 @@ service_commands = {
 
 misc_commands = {
     'list': do_list,
-}
-
-descriptions = {
-    'add': 'add services to a bundle',
-    'delete': 'delete services from a bundle',
+    'help': do_help,
 }
 
 commands = dict(
@@ -152,31 +217,6 @@ commands = dict(
     **misc_commands,
 )
 
-parser = argparse.ArgumentParser(prog=app, description=f'frontend to s6')
-subparsers = parser.add_subparsers(dest='command', required=True,
-    help=f'top-level command')
-
-for command in bundle_commands.keys():
-    subparser = subparsers.add_parser(command,
-        help=descriptions.get(command, 'bundle command'))
-    subparser.add_argument('--bundle', '-b', default='default',
-        help='the bundle to operate on (e.g., for add or delete)')
-    subparser.add_argument('services', nargs='+',
-        help='the service(s) to modify the bundle with')
-for command in service_commands.keys():
-    subparser = subparsers.add_parser(command,
-        help=descriptions.get(command, 'service command'))
-    subparser.add_argument('services', nargs='+',
-        help='the service(s) to operate on')
-for command in misc_commands.keys():
-    subparser = subparsers.add_parser(command,
-        help=descriptions.get(command, 'miscellaneous command'))
-    subparser.add_argument('items', nargs='*',
-        help='services or bundles')
-
-#parser.add_argument('items', nargs='*',
-#    help='which service to do it to')
-args = parser.parse_args()
 
 try:
     commands[args.command](args)
