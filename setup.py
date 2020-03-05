@@ -25,7 +25,7 @@ setup(
     author='Mihail Georgiev',
     author_email='misho88@gmail.com',
     package_data={
-        'service6doc': ['doc/*'],
+        'service6doc': ['doc/s6*'],
     },
     data_files=[
         ('/etc/bash_completion.d/', ['bash_completion.d/service6']),
