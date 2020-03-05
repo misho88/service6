@@ -26,5 +26,9 @@ setup(
     author_email='misho88@gmail.com',
     package_data={
         'service6doc': ['doc/*'],
-    }
+    },
+    install_requires=[
+        'natsort',
+        'blessed',
+    ],
 )
