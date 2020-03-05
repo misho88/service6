@@ -1,1 +1,1 @@
-include service6 service6doc/*.py service6doc/doc/* README.rst
+include service6 service6doc/*.py service6doc/doc/s6* README.rst
