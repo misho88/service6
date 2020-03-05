@@ -176,8 +176,8 @@ def do_help(args):
     if not args.items:
         tabulate({ terminal.bold_green('Available'): doc.available })
         print(terminal.bold_yellow(
-            f"You can access {app}'s help with --help/-h.\n"
-            f"You can access each command's help with {app} command --help/-h"
+            f"You can access {app}'s help with '{app} --help/-h'.\n"
+            f"You can access each command's help with '{app} command --help/-h'."
         ))
         return
     items = []
