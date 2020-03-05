@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 
 import argparse
+import argcomplete
 from pathlib import Path
 
 path = Path(__file__)
 app = path.name
-parser = argparse.ArgumentParser(prog=app, description=f'frontend to s6')
-subparsers = parser.add_subparsers(dest='command', required=True,
-    help=f'top-level command')
 
 bundle_commands = ('add', 'delete')
 service_commands = ('start', 'stop', 'restart', 'log')
@@ -18,11 +16,14 @@ descriptions = {
     'delete': 'delete services from a bundle',
 }
 
+parser = argparse.ArgumentParser(prog=app, description=f'Frontend to s6-rc')
+subparsers = parser.add_subparsers(dest='command', required=True,
+    help=f'top-level command')
 for command in bundle_commands:
     subparser = subparsers.add_parser(command,
         help=descriptions.get(command, 'bundle command'))
     subparser.add_argument('--bundle', '-b', default='default',
-        help='the bundle to operate on (e.g., for add or delete)')
+        help='the bundle to operate on')
     subparser.add_argument('services', nargs='+',
         help='the service(s) to modify the bundle with')
 for command in service_commands:
@@ -35,6 +36,7 @@ for command in misc_commands:
         help=descriptions.get(command, 'miscellaneous command'))
     subparser.add_argument('items', nargs='*',
         help='services or bundles')
+argcomplete.autocomplete(parser)
 args = parser.parse_args()
 
 

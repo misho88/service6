@@ -27,8 +27,12 @@ setup(
     package_data={
         'service6doc': ['doc/*'],
     },
+    data_files=[
+        ('/etc/bash_completion.d/', ['bash_completion.d/service6']),
+    ],
     install_requires=[
         'natsort',
         'blessed',
+        'argcomplete',
     ],
 )
