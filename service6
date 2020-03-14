@@ -9,7 +9,7 @@ app = path.name
 
 bundle_commands = ('add', 'delete')
 service_commands = ('start', 'stop', 'restart', 'log')
-misc_commands = ('list', 'help')
+misc_commands = ('list', 'rebuild', 'help')
 
 descriptions = {
     'add': 'add services to a bundle',
@@ -19,6 +19,7 @@ descriptions = {
     'restart': 'stop services and start them again',
     'log': 'view the logs for a service',
     'list': 'show information about bundles and services',
+    'rebuild': 'rebuild the database (Artix specific)',
     'help': 'show documentation on s6 components',
 }
 
@@ -163,14 +164,12 @@ def do_list(args):
 
 def do_start(args):
     services = " ".join(args.services)
-    res = sh(f's6-rc -u -v 2 change {services}', capture_output=False, echo=True)
-    # print(sh_stdout(f'{__file__} list {services}'))
+    sh(f's6-rc -u -v 2 change {services}', capture_output=False, echo=True)
 
 
 def do_stop(args):
     services = " ".join(args.services)
     sh(f's6-rc -d -v 2 change {services}', capture_output=False, echo=True)
-    # print(sh_stdout(f'{__file__} list {services}'))
 
 
 def do_restart(args):
@@ -235,6 +234,10 @@ def do_help(args):
         doc.show(*items)
 
 
+def do_rebuild(args):
+    sh(f'/usr/share/libalpm/scripts/s6-rc-db-update-hook', capture_output=False, echo=True)
+
+
 bundle_commands = {
     'add': do_add,
     'delete': do_delete,
@@ -249,6 +252,7 @@ service_commands = {
 
 misc_commands = {
     'list': do_list,
+    'rebuild': do_rebuild,
     'help': do_help,
 }
 
