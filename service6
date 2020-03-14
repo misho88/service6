@@ -64,10 +64,9 @@ SYMBOLS = {
     'bad': terminal.bright_red('✘ '),
 }
 
-ACTIVE = {
-    True: SYMBOLS['active'],
-    False: SYMBOLS['dead'],
-}
+
+def hsorted(seq):
+    return natsorted(seq, alg=ns.IGNORECASE)
 
 
 def sh(cmd, capture_output=True, check=True, echo=False):
@@ -81,7 +80,11 @@ def sh_stdout(cmd):
 
 
 def sh_list(cmd):
-    return natsorted(sh_stdout(cmd).split('\n'), alg=ns.IGNORECASE)
+    return hsorted(sh_stdout(cmd).splitlines())
+
+
+def sh_set(cmd):
+    return set(sh_stdout(cmd).splitlines())
 
 
 def tabulate(results):
@@ -111,23 +114,50 @@ def tabulate(results):
 
 
 def do_list(args):
-    bundles = sh_list("s6-rc-db list bundles")
-    services = sh_list("s6-rc-db list services")
-    active_services = sh_list("s6-rc -a list")
+    all_bundles = sh_set("s6-rc-db list bundles")
+    all_services = sh_set("s6-rc-db list services")
+    active_services = sh_set("s6-rc -a list")
+
+    list_items = set(args.items)
+    list_bundles = all_bundles & list_items if list_items else all_bundles
+    list_services = all_services & list_items if list_items else all_services
+    list_unknown = list_items - (list_bundles | list_services)
+
+    bundles = {
+        bundle: sh_set(f"s6-rc-bundle-update list {bundle}")
+        for bundle in list_bundles
+    }
+    claimed_services = {
+        service
+        for bundle_services in bundles.values()
+        for service in bundle_services
+    }
+
+    result_items = hsorted(bundles.items()) + [
+        ('', list_services - claimed_services),
+        ('unknown', list_unknown),
+    ]
     results = {}
-    for bundle_or_service in (args.items or bundles):
-        if bundle_or_service in bundles:
-            bundle = bundle_or_service
-            services = sh_list(f"s6-rc-bundle-update list {bundle}")
-            results[terminal.bold_yellow(bundle)] = [
-                f"{service} {ACTIVE[service in active_services]}"
-                for service in services
-            ]
-        elif bundle_or_service in services:
-            service = bundle_or_service
-            results.setdefault('', []).append(f"{service} {ACTIVE[service in active_services]}")
+    for bundle, bundle_services in result_items:
+        if not bundle_services:
+            continue
+        color = {
+            '': lambda text: text,
+            'unknown': terminal.bold_red,
+        }.get(bundle, terminal.bold_yellow)
+
+        if bundle == 'unknown':
+            def get_symbol(service):
+                return SYMBOLS['unknown']
         else:
-            results.setdefault('', []).append(f"{bundle_or_service} {SYMBOLS['unknown']}")
+            def get_symbol(service):
+                active = service in active_services
+                return SYMBOLS['active' if active else 'dead']
+
+        results[color(bundle)] = [
+            f"{service} {get_symbol(service)}"
+            for service in hsorted(bundle_services)
+        ]
     tabulate(results)
 
 
