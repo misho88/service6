@@ -8,8 +8,8 @@ path = Path(__file__)
 app = path.name
 
 bundle_commands = ('add', 'delete')
-service_commands = ('start', 'stop', 'restart', 'log')
-misc_commands = ('list', 'rebuild', 'help')
+service_commands = ('start', 'stop', 'restart')
+misc_commands = ('list', 'log', 'rebuild', 'help')
 
 descriptions = {
     'add': 'add services to a bundle',
@@ -43,12 +43,15 @@ for command in misc_commands:
         help=descriptions.get(command, 'miscellaneous command'))
     subparser.add_argument('items', nargs='*',
         help='services or bundles')
+parser.add_argument('--pager', '-p',
+    help='override the pager (e.g., less); same as setting PAGER=whatever'
+)
 argcomplete.autocomplete(parser)
 args = parser.parse_args()
 
-
+from os import environ
 from subprocess import run, CalledProcessError
-from shlex import split
+from shlex import split, join
 from natsort import natsorted, ns
 from blessed import Terminal
 
@@ -72,8 +75,11 @@ def hsorted(seq):
 
 def sh(cmd, capture_output=True, check=True, echo=False):
     if echo:
-        print(terminal.bold_yellow('>>>'), terminal.bold(cmd))
-    return run(split(cmd), capture_output=capture_output, check=check)
+        pcmd = cmd if isinstance(cmd, str) else join(cmd)
+        print(terminal.bold_yellow('>>>'), terminal.bold(pcmd))
+    if isinstance(cmd, str):
+        cmd = split(cmd)
+    return run(cmd, capture_output=capture_output, check=check)
 
 
 def sh_stdout(cmd):
@@ -238,6 +244,29 @@ def do_rebuild(args):
     sh(f'/usr/share/libalpm/scripts/s6-rc-db-update-hook', capture_output=False, echo=True)
 
 
+def do_log(args):
+    var_log = Path('/var/log')
+    logs = set(args.items)
+    names = {
+        path.name
+        for path in var_log.iterdir()
+        if path.is_dir() and path.owner() == 's6log'
+    }
+    if logs - names:
+        tabulate({
+            terminal.bold_green('Available'): hsorted(names),
+            terminal.bold_red('Unavailable'): hsorted(logs - names),
+        })
+    else:
+        log_files = {
+            var_log / name / 'current'
+            for name in logs or names
+        }
+        pager = environ.get('PAGER', 'less ++G --quit-if-one-screen')
+        sh(split(pager) + hsorted(str(f) for f in log_files), capture_output=False, echo=True)
+    
+    
+
 bundle_commands = {
     'add': do_add,
     'delete': do_delete,
@@ -247,12 +276,12 @@ service_commands = {
     'start': do_start,
     'stop': do_stop,
     'restart': do_restart,
-    # 'log': not_implemented,
 }
 
 misc_commands = {
     'list': do_list,
     'rebuild': do_rebuild,
+    'log': do_log,
     'help': do_help,
 }
 
@@ -262,6 +291,8 @@ commands = dict(
     **misc_commands,
 )
 
+if args.pager is not None:
+    environ['PAGER'] = args.pager
 
 try:
     commands[args.command](args)
