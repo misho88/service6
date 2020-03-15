@@ -153,6 +153,24 @@ def do_list(args):
             'unknown': terminal.bold_red,
         }.get(bundle, terminal.bold_yellow)
 
+        subbundles = {
+            subbundle
+            for subbundle, subbundle_services in bundles.items()
+            if subbundle_services < bundle_services
+        }
+        subbundles = {
+            a
+            for a in subbundles
+            if not any(bundles[a] < bundles[b] for b in subbundles)
+        }
+        results[color(bundle)] = [
+            f'{color(subbundle)}   '
+            for subbundle in hsorted(subbundles)
+        ]
+        printed_services = bundle_services.copy()
+        for subbundle in subbundles:
+            printed_services -= bundles[subbundle]
+
         if bundle == 'unknown':
             def get_symbol(service):
                 return SYMBOLS['unknown']
@@ -161,9 +179,9 @@ def do_list(args):
                 active = service in active_services
                 return SYMBOLS['active' if active else 'dead']
 
-        results[color(bundle)] = [
+        results[color(bundle)] += [
             f"{service} {get_symbol(service)}"
-            for service in hsorted(bundle_services)
+            for service in hsorted(printed_services)
         ]
     tabulate(results)
 
