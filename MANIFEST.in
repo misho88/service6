@@ -1,2 +1,0 @@
-include service6 service6doc/*.py service6doc/doc/s6* README.rst
-recursive-exclude . .gitignore
