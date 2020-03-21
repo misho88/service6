@@ -23,11 +23,12 @@ also in order.
 Installation
 ------------
 
-Install w3c, lynx or elinks and then install::
+Install w3c and then install::
 
-    # ./setup.py install
+    # make install
 
-Or, presumably, do anything else ``setuptools`` permits.
+Or just put the script somewhere in your path (but ``service6 help`` won't
+work, which is probably fine).
 
 Usage
 -----
