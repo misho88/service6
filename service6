@@ -229,6 +229,9 @@ def do_delete(args):
 
 def do_help(args):
     all_doc_names = [ p.name for p in Path(DOC_DIR).glob('*') ]
+    if not all_doc_names:
+        print(terminal.bold_red(f"docs not found in {DOC_DIR}"))
+        return
     if not args.items:
         tabulate({ terminal.bold_green('Available'): all_doc_names })
         print(terminal.bold_yellow(
