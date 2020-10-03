@@ -23,9 +23,9 @@ descriptions = {
     'help': 'show documentation on s6 components',
 }
 
-parser = argparse.ArgumentParser(prog=app, description=f'Frontend to s6-rc')
+parser = argparse.ArgumentParser(prog=app, description='Frontend to s6-rc')
 subparsers = parser.add_subparsers(dest='command', required=True,
-    help=f'top-level command')
+    help='top-level command')
 for command in bundle_commands:
     subparser = subparsers.add_parser(command,
         help=descriptions.get(command, 'bundle command'))
@@ -44,8 +44,7 @@ for command in misc_commands:
     subparser.add_argument('items', nargs='*',
         help='services or bundles')
 parser.add_argument('--pager', '-p',
-    help='override the pager (e.g., less); same as setting PAGER=whatever'
-)
+    help='override the pager (e.g., less); same as setting PAGER=whatever')
 argcomplete.autocomplete(parser)
 args = parser.parse_args()
 
@@ -55,7 +54,6 @@ from shlex import split, join
 from natsort import natsorted, ns
 from blessed import Terminal
 
-#import service6doc as doc
 DOC_DIR = environ.get('SERVICE6_DOC_DIR', '/usr/share/doc/service6')
 PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
 
@@ -284,7 +282,7 @@ def do_help(args):
 
 
 def do_rebuild(args):
-    sh(f'/usr/share/libalpm/scripts/s6-rc-db-update-hook', capture_output=False, echo=True)
+    sh('/usr/share/libalpm/scripts/s6-rc-db-update-hook', capture_output=False, echo=True)
 
 
 def do_log(args):
@@ -306,8 +304,7 @@ def do_log(args):
             for name in logs or names
         }
         sh(split(PAGER) + hsorted(str(f) for f in log_files), capture_output=False, echo=True)
-    
-    
+
 
 bundle_commands = {
     'add': do_add,
