@@ -96,29 +96,47 @@ def sh_set(cmd):
     return set(sh_stdout(cmd).splitlines())
 
 
-def tabulate(results):
-    klen = max(terminal.length(k) for k in results)
-    ilen = max(terminal.length(i) for items in results.values() for i in items)
-    ilen += 1  # leave a gap
+def leader_cell(text, width, position, shape):
+    i, j = position
+    m, n = shape
+    if i == 0:
+        tlen = terminal.length(text)
+        output = '─' * width
+        if m > 1 and width > 2:
+            output = output[:-2] + '┬─'
+        output = text + output[tlen:]
+    else:
+        output = ' ' * width
+        if width > 2:
+            output = output[:-2] + ('├─' if i < m - 1 else '╰─')
+    return output
 
-    ncols = (terminal.width - klen) // ilen
+
+def data_cell(text, width, position, shape):
+    tlen = terminal.length(text)
+    pad = terminal.bright_black('─' * (width - tlen - 2))
+    return f'{pad}{text}'
+
+
+def tabulate(results):
+    leader_col_width = max(
+        terminal.length(key)
+        for key in results.keys()
+    ) + 2
+    data_col_width = max(
+        terminal.length(item)
+        for items in results.values()
+        for item in items
+    ) + 2
+    n_cols = (terminal.width - leader_col_width) // data_col_width
     for key, items in results.items():
-        nrows, rem = divmod(len(items), ncols)
-        nrows += rem != 0
-        for i in range(0, len(items), ncols):
-            if i == 0:
-                pad = '─' * (klen - terminal.length(key))
-                if len(pad) >= 2 and nrows > 1:
-                    pad = f'{pad[:-2]}┬─'
-                print(f'{key}{pad}', end='')
-            elif len(items) - i <= ncols:
-                print(f'{"╰─":>{klen}}', end='')
-            else:
-                print(f'{"├─":>{klen}}', end='')
-            for item in items[i:i + ncols]:
-                pad = terminal.bright_black('╌') * (ilen - terminal.length(item))
-                print(f'{pad}{item}', end='')
-            key = ''
+        n_rows, rem = divmod(len(items), n_cols)
+        n_rows += rem != 0
+        shape = n_rows, n_cols
+        for row, i in enumerate(range(0, len(items), n_cols)):
+            print(leader_cell(key, leader_col_width, (row, 0), shape), end='')
+            for col, item in enumerate(items[i:i + n_cols], start=1):
+                print(data_cell(item, data_col_width, (row, col), shape), end='')
             print()
 
 
