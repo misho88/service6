@@ -50,11 +50,11 @@ for command in misc_commands:
     subparser = subparsers.add_parser(command,
         help=descriptions.get(command, 'miscellaneous command'))
     subparser.add_argument('items', nargs='*',
-        help='services or bundles; blank to show all logs (NOTE: the default '
-        'pager is less, where :n and :p switch between buffers for viewing '
-        'multiple logs)')
+        help='services or bundles')
 parser.add_argument('--pager', '-p',
-    help='override the pager (e.g., less); same as setting PAGER=whatever')
+    help='override the pager (e.g., less); same as setting PAGER environment '
+         'variable (NOTE: use :n and :p to switch buffers in less when '
+         'viewing multiple items)')
 argcomplete.autocomplete(parser)
 args = parser.parse_args()
 
@@ -303,7 +303,7 @@ def do_log(args):
         for path in var_log.iterdir()
         if path.is_dir() and path.owner() == 's6log'
     }
-    if logs - names:
+    if not logs or logs - names:
         tabulate({
             terminal.bold_green('Available'): hsorted(names),
             terminal.bold_red('Unavailable'): hsorted(logs - names),
