@@ -59,10 +59,11 @@ argcomplete.autocomplete(parser)
 args = parser.parse_args()
 
 from os import environ
-from subprocess import run, CalledProcessError
+from subprocess import run, CalledProcessError, Popen, PIPE
 from shlex import split, join
 from natsort import natsorted, ns
 from blessed import Terminal
+from contextlib import ExitStack
 
 DOC_DIR = environ.get('SERVICE6_DOC_DIR', '/usr/share/doc/service6')
 PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
@@ -100,8 +101,18 @@ def sh_list(cmd):
     return hsorted(sh_stdout(cmd).splitlines())
 
 
-def sh_set(cmd):
-    return set(sh_stdout(cmd).splitlines())
+def parallel(argvs):
+    with ExitStack() as stack:
+        procs = [
+            stack.enter_context(Popen(argv, stdout=PIPE, stderr=PIPE))
+            for argv in argvs
+        ]
+        outputs = [ proc.stdout.read() for proc in procs ]
+        for i, proc in enumerate(procs):
+            returncode = proc.wait()
+            if returncode:
+                raise CalledProcessError(returncode, proc.args, outputs[i], proc.stderr.read())
+    return outputs
 
 
 def leader_cell(text, width, position, shape):
@@ -149,19 +160,27 @@ def tabulate(results):
 
 
 def do_list(args):
-    all_bundles = sh_set("s6-rc-db list bundles")
-    all_services = sh_set("s6-rc-db list services")
-    active_services = sh_set("s6-rc -a list")
+    outputs = parallel((
+        ('s6-rc-db', 'list', 'bundles'),
+        ('s6-rc-db', 'list', 'services'),
+        ('s6-rc', '-a', 'list'),
+    ))
+    all_bundles, all_services, active_services = (
+        set(output.decode().splitlines())
+        for output in outputs
+    )
 
     list_items = set(args.items)
     list_bundles = all_bundles & list_items if list_items else all_bundles
     list_services = all_services & list_items if list_items else all_services
     list_unknown = list_items - (list_bundles | list_services)
 
+    outputs = parallel(('s6-rc-bundle-update', 'list', bundle) for bundle in list_bundles)
     bundles = {
-        bundle: sh_set(f"s6-rc-bundle-update list {bundle}")
-        for bundle in list_bundles
+        bundle: set(output.decode().splitlines())
+        for bundle, output in zip(list_bundles, outputs)
     }
+
     claimed_services = {
         service
         for bundle_services in bundles.values()
@@ -254,7 +273,7 @@ def do_delete(args):
 
 
 def do_help(args):
-    all_doc_names = [ p.name for p in Path(DOC_DIR).glob('*') ]
+    all_doc_names = [ p.name for p in Path(DOC_DIR).iterdir() ]
     if not all_doc_names:
         print(terminal.bold_red(f"docs not found in {DOC_DIR}"))
         return
