@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 
+"""servic6: a pretty wrapper around s6/s6-rc's utilities"""
+
+__version__ = '0.1.0'
+__author__ = 'Mihail Georgiev'
+__email__ = 'misho88@gmail.com'
+__copyright__ = 'Copyright 2020, Mihail Georgiev'
+__license__ = 'GNU GPLv3'
+
 import argparse
 import argcomplete
 from pathlib import Path
@@ -42,7 +50,9 @@ for command in misc_commands:
     subparser = subparsers.add_parser(command,
         help=descriptions.get(command, 'miscellaneous command'))
     subparser.add_argument('items', nargs='*',
-        help='services or bundles')
+        help='services or bundles; blank to show all logs (NOTE: the default '
+        'pager is less, where :n and :p switch between buffers for viewing '
+        'multiple logs)')
 parser.add_argument('--pager', '-p',
     help='override the pager (e.g., less); same as setting PAGER=whatever')
 argcomplete.autocomplete(parser)
