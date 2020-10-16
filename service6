@@ -20,21 +20,21 @@ from functools import wraps
 from itertools import chain
 
 
-DOC_DIR = environ.get('SERVICE6_DOC_DIR', '/usr/share/doc/service6')
-DOC_NAMES = tuple(p.name for p in Path(DOC_DIR).iterdir())
+DOC_PATH = environ.get('SERVICE6_DOC_PATH', '/usr/share/doc/service6')
+DOC_NAMES = tuple(p.name for p in Path(DOC_PATH).iterdir())
 PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
 LOG_PATH = Path(environ.get('SERVICE6_LOG_PATH', '/var/log'))
 LOG_OWNER = environ.get('SERVICE6_LOG_OWNER', 's6log')
 
-PRIVILEGE_ESCALATION = environ.get('SERVICE6_PRIVILEGE_ESCALATION', 'never')
-if PRIVILEGE_ESCALATION not in ('never', 'list', 'always'):
+PRIVILEGE_ELEVATION = environ.get('SERVICE6_PRIVILEGE_ELEVATION', 'never')
+if PRIVILEGE_ELEVATION not in ('never', 'list', 'always'):
     print(
-        'SERVICE6_PRIVILEGE_ESCALATION must be never, list or always, not '
-        f'{PRIVILEGE_ESCALATION}',
+        'SERVICE6_PRIVILEGE_ELEVATION must be never, list or always, not '
+        f'{PRIVILEGE_ELEVATION}',
         file=stderr,
     )
     exit(1)
-if PRIVILEGE_ESCALATION == 'never':
+if PRIVILEGE_ELEVATION == 'never':
     SUDO = LIST_SUDO = ()
 else:
     sudo_candidates = 'sudo', 'doas'
@@ -50,13 +50,20 @@ else:
                 break
         else:
             LIST_SUDO = ()
-    SUDO = LIST_SUDO if PRIVILEGE_ESCALATION == 'always' else ()
+    SUDO = LIST_SUDO if PRIVILEGE_ELEVATION == 'always' else ()
 
 CMD = {
     'list bundles': LIST_SUDO + ('s6-rc-db', 'list', 'bundles'),
     'list services': LIST_SUDO + ('s6-rc-db', 'list', 'services'),
     'list active': LIST_SUDO + ('s6-rc', '-a', 'list'),
-    'list in bundle': LIST_SUDO + ('s6-rc-bundle-update', 'list')
+    'list in bundle': LIST_SUDO + ('s6-rc-bundle-update', 'list'),
+    'start': SUDO + ('s6-rc', '-u', '-v', '2', 'change'),
+    'stop': SUDO + ('s6-rc', '-d', '-v', '2', 'change'),
+    'add bundle': SUDO + ('s6-rc-bundle', 'add'),
+    'delete bundle': SUDO + ('s6-rc-bundle', 'delete'),
+    'add to bundle': SUDO + ('s6-rc-bundle-update',  'add'),
+    'delete from bundle': SUDO + ('s6-rc-bundle-update', 'delete'),
+    'rebuild database': SUDO + ('/usr/share/libalpm/scripts/s6-rc-db-update-hook',),
 }
 
 
@@ -233,6 +240,18 @@ completers = { cmd: globals().get(f'complete_{cmd}') for cmd in chain(
     misc_commands,
     ('pager', 'bundle'),
 ) }
+
+epilog = """\
+Environment variables:
+SERVICE6_DOC_PATH: where to look for documentation files
+SERVICE6_LOG_PATH: where to look for service logs (generally /var/log)
+SERVICE6_LOG_OWNER: who owns the S6 logs (generally s6log)
+PRIVILEGE_ELEVATION: whether to automatically run sudo or doas
+    if absent or "never", do not do this (adversely affects TAB-completion)
+    if "list", only do this for list commands that should not alter the system state
+    if "always", do this for all commands that need elevated privileges
+        NOTE: this is noninteractive, so while sudo/doas needs a password, it won't work
+"""
 
 parser = ArgumentParser(prog=app, description='Frontend to s6-rc')
 subparsers = parser.add_subparsers(dest='command', required=True,
@@ -433,13 +452,11 @@ def do_list(args):
 
 
 def do_start(args):
-    services = " ".join(args.services)
-    sh(f's6-rc -u -v 2 change {services}', capture_output=False, echo=True)
+    sh(CMD['start'] + tuple(args.services), capture_output=False, echo=True)
 
 
 def do_stop(args):
-    services = " ".join(args.services)
-    sh(f's6-rc -d -v 2 change {services}', capture_output=False, echo=True)
+    sh(CMD['stop'] + tuple(args.services), capture_output=False, echo=True)
 
 
 def do_restart(args):
@@ -448,32 +465,34 @@ def do_restart(args):
 
 
 def do_add(args):
-    services = " ".join(args.services)
-    bundle = args.bundle
-    bundles = sh_list("s6-rc-db list bundles")
-    if bundle in bundles:
-        sh(f's6-rc-bundle-update add {bundle} "{services}"', capture_output=False, echo=True)
-    else:
-        sh(f's6-rc-bundle add {bundle} {services}', capture_output=False, echo=True)
+    bundles = sh_list(CMD['list bundles'])
+    cmd = CMD['add to bundle' if args.bundle in bundles else 'add bundle']
+    sh(cmd + (args.bundle,) + tuple(args.services), capture_output=False, echo=True)
 
 
 def do_delete(args):
-    bundles = sh_list("s6-rc-db list bundles")
+    results = parallel((
+        CMD['list bundles'],
+        CMD['list in bundle'] + (args.bundle,),
+    ))
+    all_bundles, bundle_services = ( set(lines(r)) for r in results )
 
-    services = []
-    for service in args.services:
-        if service in bundles:
-            services += sh_list(f"s6-rc-bundle-update list {service}")
-        else:
-            services.append(service)
-    services_str = " ".join(services)
-    bundle = args.bundle
-    sh(f's6-rc-bundle-update delete {bundle} "{services_str}"', capture_output=False, echo=True)
+    services_or_bundles = set(args.services)
+    bundles = services_or_bundles & all_bundles
+    services = services_or_bundles - bundles
+
+    results = parallel((CMD['list in bundle'] + (b,) for b in bundles))
+    services = services.union(*( set(lines(r)) for r in results ))
+
+    delete_bundle = services == bundle_services
+    cmd = CMD['delete bundle' if delete_bundle else 'delete from bundle']
+    service_args = () if delete_bundle else tuple(services)
+    sh(cmd + (args.bundle,) + service_args, capture_output=False, echo=True)
 
 
 def do_help(args):
     if not DOC_NAMES:
-        print(terminal.bold_red(f"docs not found in {DOC_DIR}"))
+        print(terminal.bold_red(f"docs not found in {DOC_PATH}"))
         return
     if not args.items:
         tabulate({ terminal.bold_green('Available'): DOC_NAMES })
@@ -504,20 +523,19 @@ def do_help(args):
             terminal.bold_red('Unavailable'): baditems,
         })
     else:
-        doc_files = [ Path(DOC_DIR) / item for item in items ]
+        doc_files = [ Path(DOC_PATH) / item for item in items ]
         sh(split(PAGER) + hsorted(str(f) for f in doc_files), capture_output=False, echo=True)
 
 
 def do_rebuild(args):
-    sh('/usr/share/libalpm/scripts/s6-rc-db-update-hook', capture_output=False, echo=True)
+    sh(CMD['rebuild database'], capture_output=False, echo=True)
 
 
 def do_log(args):
-    var_log = Path('/var/log')
     logs = set(args.items)
     names = {
         path.name
-        for path in var_log.iterdir()
+        for path in LOG_PATH.iterdir()
         if path.is_dir() and path.owner() == 's6log'
     }
     if not logs or logs - names:
@@ -527,7 +545,7 @@ def do_log(args):
         })
     else:
         log_files = {
-            var_log / name / 'current'
+            LOG_PATH / name / 'current'
             for name in logs or names
         }
         sh(split(PAGER) + hsorted(str(f) for f in log_files), capture_output=False, echo=True)
