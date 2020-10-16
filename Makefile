@@ -11,7 +11,10 @@ all: $(DOC_DIR) $(DOC_TARGETS)
 $(DOC_DIR):
 	mkdir $(DOC_DIR)
 
-$(DOC_TARGETS): $(DOC_SOURCES)
+doc/%: s6/doc/%.html
+	$(BROWSER) -dump $< > $@
+
+doc/%: s6-rc/doc/%.html
 	$(BROWSER) -dump $< > $@
 
 install:
