@@ -11,13 +11,18 @@ __license__ = 'GNU GPLv3'
 import argparse
 import argcomplete
 from pathlib import Path
+from os import environ
+
+DOC_DIR = environ.get('SERVICE6_DOC_DIR', '/usr/share/doc/service6')
+DOC_NAMES = tuple(p.name for p in Path(DOC_DIR).iterdir())
 
 path = Path(__file__)
 app = path.name
 
 bundle_commands = ('add', 'delete')
 service_commands = ('start', 'stop', 'restart')
-misc_commands = ('list', 'log', 'rebuild', 'help')
+misc_commands = 'list', 'log', 'rebuild'
+help_commands = 'help',
 
 descriptions = {
     'add': 'add services to a bundle',
@@ -51,6 +56,11 @@ for command in misc_commands:
         help=descriptions.get(command, 'miscellaneous command'))
     subparser.add_argument('items', nargs='*',
         help='services or bundles')
+for command in help_commands:
+    subparser = subparsers.add_parser(command,
+        help=descriptions.get(command, 'help command'))
+    subparser.add_argument('items', nargs='*',
+        help='services or bundles').completer = lambda **kwargs: DOC_NAMES
 parser.add_argument('--pager', '-p',
     help='override the pager (e.g., less); same as setting PAGER environment '
          'variable (NOTE: use :n and :p to switch buffers in less when '
@@ -58,14 +68,12 @@ parser.add_argument('--pager', '-p',
 argcomplete.autocomplete(parser)
 args = parser.parse_args()
 
-from os import environ
 from subprocess import run, CalledProcessError, Popen, PIPE
 from shlex import split, join
 from natsort import natsorted, ns
 from blessed import Terminal
 from contextlib import ExitStack
 
-DOC_DIR = environ.get('SERVICE6_DOC_DIR', '/usr/share/doc/service6')
 PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
 
 terminal = Terminal()
@@ -273,12 +281,11 @@ def do_delete(args):
 
 
 def do_help(args):
-    all_doc_names = [ p.name for p in Path(DOC_DIR).iterdir() ]
-    if not all_doc_names:
+    if not DOC_NAMES:
         print(terminal.bold_red(f"docs not found in {DOC_DIR}"))
         return
     if not args.items:
-        tabulate({ terminal.bold_green('Available'): all_doc_names })
+        tabulate({ terminal.bold_green('Available'): DOC_NAMES })
         print(terminal.bold_yellow(
             f"You can access {app}'s help with '{app} --help/-h'.\n"
             f"You can access each command's help with '{app} command --help/-h'."
@@ -287,9 +294,9 @@ def do_help(args):
     items = []
     baditems = []
     for item in args.items:
-        if item in all_doc_names:
+        if item in DOC_NAMES:
             items.append(item)
-        elif not item.startswith('s6-') and f's6-{item}' in all_doc_names:
+        elif not item.startswith('s6-') and f's6-{item}' in DOC_NAMES:
             items.append(f's6-{item}')
         elif item not in baditems:
             baditems.append(item)
@@ -298,7 +305,7 @@ def do_help(args):
     if baditems:
         available = [
             f'{item} {SYMBOLS["good" if item in items else "neutral"]}'
-            for item in all_doc_names
+            for item in DOC_NAMES
         ]
         baditems = [ f'{item} {SYMBOLS["bad"]}' for item in baditems ]
         tabulate({
