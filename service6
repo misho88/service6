@@ -8,21 +8,70 @@ __email__ = 'misho88@gmail.com'
 __copyright__ = 'Copyright 2020, Mihail Georgiev'
 __license__ = 'GNU GPLv3'
 
-import argparse
-import argcomplete
+from argparse import ArgumentParser
+from argcomplete import autocomplete
 from pathlib import Path
 from os import environ
+from sys import stderr, exit
+from subprocess import run, CalledProcessError, Popen, PIPE
+from shlex import split, join
+from contextlib import ExitStack
+
 
 DOC_DIR = environ.get('SERVICE6_DOC_DIR', '/usr/share/doc/service6')
 DOC_NAMES = tuple(p.name for p in Path(DOC_DIR).iterdir())
+PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
+LOG_PATH = Path(environ.get('SERVICE6_LOG_PATH', '/var/log'))
+LOG_OWNER = environ.get('SERVICE6_LOG_OWNER', 's6log')
+
+PRIVILEGE_ESCALATION = environ.get('SERVICE6_PRIVILEGE_ESCALATION', 'never')
+if PRIVILEGE_ESCALATION not in ('never', 'list', 'always'):
+    print(
+        'SERVICE6_PRIVILEGE_ESCALATION must be never, list or always, not '
+        f'{PRIVILEGE_ESCALATION}',
+        file=stderr,
+    )
+    exit(1)
+if PRIVILEGE_ESCALATION == 'never':
+    SUDO = LIST_SUDO = ()
+else:
+    sudo_candidates = 'sudo', 'doas'
+    with ExitStack() as stack:
+        procs = (
+            Popen(( 'which', exe ), stdout=PIPE, stderr=PIPE)
+            for exe in sudo_candidates
+        )
+        sprocs = ( stack.enter_context(proc) for proc in procs )
+        for i, proc in enumerate(sprocs):
+            if proc.wait() == 0:
+                LIST_SUDO = sudo_candidates[i], '-n'
+                break
+        else:
+            LIST_SUDO = ()
+    SUDO = LIST_SUDO if PRIVILEGE_ESCALATION == 'always' else ()
+
+CMD = {
+    'list bundles': LIST_SUDO + ('s6-rc-db', 'list', 'bundles'),
+    'list services': LIST_SUDO + ('s6-rc-db', 'list', 'services'),
+    'list active': LIST_SUDO + ('s6-rc', '-a', 'list'),
+    'list in bundle': LIST_SUDO + ('s6-rc-bundle-update', 'list')
+}
+
+
+def get_set(cmd):
+    return set(run(
+        cmd,
+        capture_output=True,
+        check=True,
+    ).stdout.decode().splitlines())
+
 
 path = Path(__file__)
 app = path.name
 
-bundle_commands = ('add', 'delete')
-service_commands = ('start', 'stop', 'restart')
-misc_commands = 'list', 'log', 'rebuild'
-help_commands = 'help',
+bundle_commands = 'add', 'delete'
+service_commands = 'start', 'stop', 'restart'
+misc_commands = 'list', 'log', 'rebuild', 'help'
 
 descriptions = {
     'add': 'add services to a bundle',
@@ -36,45 +85,84 @@ descriptions = {
     'help': 'show documentation on s6 components',
 }
 
-parser = argparse.ArgumentParser(prog=app, description='Frontend to s6-rc')
+
+def null_completer(**kwargs):
+    return ()
+
+
+def path_completer(**kwargs):
+    path = environ['PATH'].split(':')
+    return [
+        exe.name
+        for dir in path
+        for exe in Path(dir).iterdir()
+        if exe.lstat().st_mode & 0o100400  # regular file, executable
+    ]
+
+
+completers = {
+    'bundle': lambda **_: get_set(CMD['list bundles']),
+    'add': lambda **_: get_set(CMD['list services']),
+    'delete': lambda **_: get_set(CMD['list services']),
+    'start': lambda **_: get_set(CMD['list services']) - get_set(CMD['list active']),
+    'stop': lambda **_: get_set(CMD['list active']),
+    'restart': lambda **_: get_set(CMD['list services']),
+    'log': lambda **_: [ d.name for d in LOG_PATH.iterdir() if d.is_dir() and d.owner() == LOG_OWNER ],
+    'list': lambda **_: get_set(CMD['list bundles']) | get_set(CMD['list services']),
+    'help': lambda **_: DOC_NAMES,
+    'pager': path_completer,
+}
+
+parser = ArgumentParser(prog=app, description='Frontend to s6-rc')
 subparsers = parser.add_subparsers(dest='command', required=True,
     help='top-level command')
+
 for command in bundle_commands:
-    subparser = subparsers.add_parser(command,
-        help=descriptions.get(command, 'bundle command'))
-    subparser.add_argument('--bundle', '-b', default='default',
-        help='the bundle to operate on')
-    subparser.add_argument('services', nargs='+',
-        help='the service(s) to modify the bundle with')
+    subparser = subparsers.add_parser(
+        command,
+        help=descriptions.get(command, 'bundle command'),
+    )
+    subparser.add_argument(
+        '--bundle', '-b', default='default',
+        help='the bundle to operate on',
+    ).completer = completers.get('bundle', null_completer)
+    subparser.add_argument(
+        'services', nargs='+',
+        help='the service(s) to modify the bundle with',
+    ).completer = completers.get(command, null_completer)
+
 for command in service_commands:
-    subparser = subparsers.add_parser(command,
-        help=descriptions.get(command, 'service command'))
-    subparser.add_argument('services', nargs='+',
-        help='the service(s) to operate on')
+    subparser = subparsers.add_parser(
+        command,
+        help=descriptions.get(command, 'service command'),
+    )
+    subparser.add_argument(
+        'services', nargs='+',
+        help='the service(s) to operate on',
+    ).completer = completers.get(command, null_completer)
+
 for command in misc_commands:
-    subparser = subparsers.add_parser(command,
-        help=descriptions.get(command, 'miscellaneous command'))
-    subparser.add_argument('items', nargs='*',
-        help='services or bundles')
-for command in help_commands:
-    subparser = subparsers.add_parser(command,
-        help=descriptions.get(command, 'help command'))
-    subparser.add_argument('items', nargs='*',
-        help='services or bundles').completer = lambda **kwargs: DOC_NAMES
-parser.add_argument('--pager', '-p',
+    subparser = subparsers.add_parser(
+        command,
+        help=descriptions.get(command, 'miscellaneous command')
+    )
+    subparser.add_argument(
+        'items', nargs='*',
+        help='services or bundles',
+    ).completer = completers.get(command, null_completer)
+
+parser.add_argument(
+    '--pager', '-p',
     help='override the pager (e.g., less); same as setting PAGER environment '
          'variable (NOTE: use :n and :p to switch buffers in less when '
-         'viewing multiple items)')
-argcomplete.autocomplete(parser)
+         'viewing multiple items)',
+).completer = completers['pager']
+
+autocomplete(parser)
 args = parser.parse_args()
 
-from subprocess import run, CalledProcessError, Popen, PIPE
-from shlex import split, join
 from natsort import natsorted, ns
 from blessed import Terminal
-from contextlib import ExitStack
-
-PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
 
 terminal = Terminal()
 
@@ -154,7 +242,7 @@ def tabulate(results):
         terminal.length(item)
         for items in results.values()
         for item in items
-    ) + 2
+    ) + 3
     n_cols = (terminal.width - leader_col_width) // data_col_width
     for key, items in results.items():
         n_rows, rem = divmod(len(items), n_cols)
@@ -168,11 +256,7 @@ def tabulate(results):
 
 
 def do_list(args):
-    outputs = parallel((
-        ('s6-rc-db', 'list', 'bundles'),
-        ('s6-rc-db', 'list', 'services'),
-        ('s6-rc', '-a', 'list'),
-    ))
+    outputs = parallel(CMD[t] for t in ('list bundles', 'list services', 'list active'))
     all_bundles, all_services, active_services = (
         set(output.decode().splitlines())
         for output in outputs
@@ -183,7 +267,7 @@ def do_list(args):
     list_services = all_services & list_items if list_items else all_services
     list_unknown = list_items - (list_bundles | list_services)
 
-    outputs = parallel(('s6-rc-bundle-update', 'list', bundle) for bundle in list_bundles)
+    outputs = parallel(CMD['list in bundle'] + (bundle,) for bundle in list_bundles)
     bundles = {
         bundle: set(output.decode().splitlines())
         for bundle, output in zip(list_bundles, outputs)
