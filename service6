@@ -8,11 +8,10 @@ __email__ = 'misho88@gmail.com'
 __copyright__ = 'Copyright 2020, Mihail Georgiev'
 __license__ = 'GNU GPLv3'
 
-from argparse import ArgumentParser
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from argcomplete import autocomplete, warn, SuppressCompleter
 from pathlib import Path
 from os import environ
-from sys import stderr, exit
 from subprocess import run, CalledProcessError, Popen, PIPE
 from shlex import split, join
 from contextlib import ExitStack
@@ -26,31 +25,11 @@ PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
 LOG_PATH = Path(environ.get('SERVICE6_LOG_PATH', '/var/log'))
 LOG_OWNER = environ.get('SERVICE6_LOG_OWNER', 's6log')
 
-PRIVILEGE_ELEVATION = environ.get('SERVICE6_PRIVILEGE_ELEVATION', 'never')
-if PRIVILEGE_ELEVATION not in ('never', 'list', 'always'):
-    print(
-        'SERVICE6_PRIVILEGE_ELEVATION must be never, list or always, not '
-        f'{PRIVILEGE_ELEVATION}',
-        file=stderr,
-    )
-    exit(1)
-if PRIVILEGE_ELEVATION == 'never':
-    SUDO = LIST_SUDO = ()
-else:
-    sudo_candidates = 'sudo', 'doas'
-    with ExitStack() as stack:
-        procs = (
-            Popen(( 'which', exe ), stdout=PIPE, stderr=PIPE)
-            for exe in sudo_candidates
-        )
-        sprocs = ( stack.enter_context(proc) for proc in procs )
-        for i, proc in enumerate(sprocs):
-            if proc.wait() == 0:
-                LIST_SUDO = sudo_candidates[i], '-n'
-                break
-        else:
-            LIST_SUDO = ()
-    SUDO = LIST_SUDO if PRIVILEGE_ELEVATION == 'always' else ()
+SUDO = environ.get('SERVICE6_SUDO', '')
+LIST_SUDO = environ.get('SERVICE6_LIST_SUDO', SUDO)
+SUDO, LIST_SUDO = ( tuple(split(cmd)) for cmd in (SUDO, LIST_SUDO) )
+
+print(SUDO, LIST_SUDO)
 
 CMD = {
     'list bundles': LIST_SUDO + ('s6-rc-db', 'list', 'bundles'),
@@ -246,14 +225,23 @@ Environment variables:
 SERVICE6_DOC_PATH: where to look for documentation files
 SERVICE6_LOG_PATH: where to look for service logs (generally /var/log)
 SERVICE6_LOG_OWNER: who owns the S6 logs (generally s6log)
-PRIVILEGE_ELEVATION: whether to automatically run sudo or doas
-    if absent or "never", do not do this (adversely affects TAB-completion)
-    if "list", only do this for list commands that should not alter the system state
-    if "always", do this for all commands that need elevated privileges
-        NOTE: this is noninteractive, so while sudo/doas needs a password, it won't work
+SERVICE6_SUDO: prepend this to all operations that need elevated privileges
+    Good choice are 'su', 'sudo' or 'doas', while setting SERVICE6_LIST_SUDO
+    to something noninteractive.
+SERVICE6_LIST_SUDO: like SERVICE6_SUDO, but only to list operations, which
+    should not alter the system state. Will inherit from SERVICE6_SUDO if
+    not explicitly provided.
+    Good choices are 'sudo -n' or 'doas -n'.
+    This should be safer than SERVICE6_SUDO inasmuch as the system state
+    should not change.\
 """
 
-parser = ArgumentParser(prog=app, description='Frontend to s6-rc')
+parser = ArgumentParser(
+    prog=app,
+    description='Frontend to s6-rc',
+    epilog=epilog,
+    formatter_class=RawDescriptionHelpFormatter,
+)
 subparsers = parser.add_subparsers(dest='command', required=True,
     help='top-level command')
 
@@ -303,6 +291,7 @@ args = parser.parse_args()
 
 from natsort import natsorted, ns
 from blessed import Terminal
+from sys import stderr
 
 terminal = Terminal()
 
@@ -310,7 +299,7 @@ SYMBOLS = {
     'active': terminal.bright_green('✔ '),
     'dead': terminal.bright_black('✘ '),
     'unknown': terminal.bright_red('❓'),
-    'neutral': terminal.bright_red('  '),
+    'neutral': '  ',
     'good': terminal.bright_green('✔ '),
     'bad': terminal.bright_red('✘ '),
 }
@@ -561,4 +550,4 @@ except CalledProcessError as e:
     if e.stdout:
         print(e.stdout.decode())
     if e.stderr:
-        print(terminal.red(e.stderr.decode()))
+        print(terminal.red(e.stderr.decode()), file=stderr)
