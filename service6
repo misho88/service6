@@ -294,12 +294,12 @@ from sys import stderr
 terminal = Terminal()
 
 SYMBOLS = {
-    'active': terminal.bright_green('✔ '),
-    'dead': terminal.bright_black('✘ '),
+    'active': terminal.bold_green('✔ '),
+    'dead': terminal.bold_black('✘ '),
     'unknown': terminal.bold_red('⚠ '),
     'neutral': '  ',
-    'good': terminal.bright_green('✔ '),
-    'bad': terminal.bright_red('✘ '),
+    'good': terminal.bold_green('✔ '),
+    'bad': terminal.bold_red('✘ '),
 }
 
 
