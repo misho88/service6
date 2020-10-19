@@ -29,8 +29,6 @@ SUDO = environ.get('SERVICE6_SUDO', '')
 LIST_SUDO = environ.get('SERVICE6_LIST_SUDO', SUDO)
 SUDO, LIST_SUDO = ( tuple(split(cmd)) for cmd in (SUDO, LIST_SUDO) )
 
-print(SUDO, LIST_SUDO)
-
 CMD = {
     'list bundles': LIST_SUDO + ('s6-rc-db', 'list', 'bundles'),
     'list services': LIST_SUDO + ('s6-rc-db', 'list', 'services'),
@@ -298,7 +296,7 @@ terminal = Terminal()
 SYMBOLS = {
     'active': terminal.bright_green('✔ '),
     'dead': terminal.bright_black('✘ '),
-    'unknown': terminal.bright_red('❓'),
+    'unknown': terminal.bold_red('⚠ '),
     'neutral': '  ',
     'good': terminal.bright_green('✔ '),
     'bad': terminal.bright_red('✘ '),
