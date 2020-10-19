@@ -17,7 +17,7 @@ doc/%: s6/doc/%.html
 doc/%: s6-rc/doc/%.html
 	$(BROWSER) -dump $< > $@
 
-install:
+install: all
 	install $(SERVICE6) /usr/bin
 	install -d /usr/share/doc/service6
 	install $(DOC_DIR)/* /usr/share/doc/service6
