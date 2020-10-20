@@ -18,15 +18,17 @@ doc/%: s6-rc/doc/%.html
 	$(BROWSER) -dump $< > $@
 
 install: all
-	install $(SERVICE6) /usr/bin
-	install -d /usr/share/doc/service6
-	install $(DOC_DIR)/* /usr/share/doc/service6
-	install bash_completion.d/service6 /etc/bash_completion.d
+	install -d ${DESTDIR}/usr/bin
+	install $(SERVICE6) ${DESTDIR}/usr/bin
+	install -d ${DESTDIR}/usr/share/doc/service6
+	install $(DOC_DIR)/* ${DESTDIR}/usr/share/doc/service6
+	install -d ${DESTDIR}/etc/bash_completion.d
+	install bash_completion.d/service6 ${DESTDIR}/etc/bash_completion.d
 
 uninstall:
-	rm -f /usr/bin/service6
-	rm -rf /usr/share/doc/service6
-	rm -f /etc/bash_completion.d/service6
+	rm -f ${DESTDIR}/usr/bin/service6
+	rm -rf ${DESTDIR}/usr/share/doc/service6
+	rm -f ${DESTDIR}/etc/bash_completion.d/service6
 
 clean:
 	rm -rf $(DOC_DIR)
