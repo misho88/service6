@@ -2,33 +2,45 @@ service6
 ========
 
 A wrapper around the service management parts of s6 (s6-rc, s6-rc-db,
-s6-rc-bundle, s6-rc-bundle-update). Details: https://skarnet.org/software/s6/
+s6-rc-bundle, s6-rc-bundle-update). Details: https://skarnet.org/software/s6-rc/
 
 Why?
 ----
 
-s6's tools really look like they're more meant to be scripted than used by
-humans. This isn't a bad thing. It has certainly made writing this utility
-very easy and I wish more software suites were written with that kind of 
-granularity; however, remembering those commands and typing them over and
-over again is an absolute chore.
+The utilities in s6-rc are very easy to script and not especially easy to type
+out by hand, and the `-h` help isn't especially informative, so I had trouble
+using the suite.
 
 Current State
 -------------
 
-I wrote this in a few hours over the weekend, so not great, but I think it's
-usable. The main feature missing is a way to read logs. Some documentation is
-also in order.
+Feature complete, but likely a bit buggy, although I have been using it for months
+without any issues. It can add/delete services from the database, start/stop/restart
+services, list services and their current state, show logs of services, rebuild the
+service database (on Artix), and show help on the s6 and s6-rc tools (pulled from
+their git repos).
 
 Installation
 ------------
 
-Install w3c and then install::
+The `python-argcomplete`, `python-natsort` and `python-blessed` are needed. Drop
+the `python-` prefix if you wish to install them from PyPI.
 
+Install w3c (to convert the s6/s6-rc documentation to text) and then install:
+
+    $ make
     # make install
 
-Or just put the script somewhere in your path (but ``service6 help`` won't
-work, which is probably fine).
+or just put the script somewhere in your path, but TAB-completion and reading of the
+s6 documentation won't work.
+
+s6-rc needs root permissions to get any information on services, and I didn't want to
+make `service6` just call `sudo` (or `doas`) silently; therefore, to have 
+TAB-completion work fully, export `SERVICE6_SUDO` or `SERVICE6_LIST_SUDO`.
+With a password-prompt based `sudo`, I recommend::
+
+    export SERVICE6_LIST_SUDO="sudo -n"
+    export SERVICE6_SUDO="sudo"  # or just don't set it
 
 Usage
 -----
@@ -108,22 +120,20 @@ deletes all its services, so maybe be careful)::
            ├────────lightdm-log ✔ ───────lightdm-srv ✔ ────────lm_sensors ✔ NetworkManager-log ✔ 
            ╰─NetworkManager-srv ✔
 
-The same but to a new bundle (note the error message below; it comes from
-``s6-rc-bundle-update`` so maybe it'll go away one day, but I don't want to
-suppress it through ``service6``)::
+The same but to a new bundle::
 
     # service6 list demo
-    unknown──demo ❓
-    # service6 add --bundle demo sshd
-    >>> s6-rc-bundle add demo sshd
+    unknown───demo ⚠ 
+    # service6 add --bundle demo sshd bluetoothd
+    >>> s6-rc-bundle add demo sshd bluetoothd
     # service6 list demo
-    demo──sshd-log ✔ sshd-srv ✔ 
+    demo───bluetoothd-log ✘ ─bluetoothd-srv ✘ ───────sshd-log ✔ ───────sshd-srv ✔ 
     # service6 delete --bundle demo sshd
-    >>> s6-rc-bundle-update delete demo "sshd-log sshd-srv"
-    s6-rc-bundle: usage: s6-rc-bundle [ -l live ] [ -c compiled ] [ -b ] command... (use s6-rc-bundle help for more information)
-    Command '['s6-rc-bundle-update', 'delete', 'demo', 'sshd-log sshd-srv']' returned non-zero exit status 100.
+    >>> s6-rc-bundle-update delete demo sshd-log sshd-srv
+    # service6 delete --bundle demo bluetoothd
+    >>> s6-rc-bundle delete demo
     # service6 list demo
-    unknown──demo ❓
+    unknown───demo ⚠ 
 
 Get help quickly on some bit of ``s6`` or ``sr-rc``::
 
@@ -141,4 +151,9 @@ Get help quickly on some bit of ``s6`` or ``sr-rc``::
     The s6-rc program
     ...
 
-
+Read a log (terrible choice of PAGER for demo only)::
+    $ PAGER="head -3" service6 log sshd
+    >>> head -3 /var/log/sshd/current
+    2020-09-14 11:20:44.512831794  Server listening on 0.0.0.0 port 22.
+    2020-09-14 11:20:44.512863490  Server listening on :: port 22.
+    2020-09-26 21:54:23.214691224  Received signal 15; terminating.
