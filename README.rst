@@ -152,6 +152,7 @@ Get help quickly on some bit of ``s6`` or ``sr-rc``::
     ...
 
 Read a log (terrible choice of PAGER for demo only)::
+
     $ PAGER="head -3" service6 log sshd
     >>> head -3 /var/log/sshd/current
     2020-09-14 11:20:44.512831794  Server listening on 0.0.0.0 port 22.
