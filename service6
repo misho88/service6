@@ -100,11 +100,19 @@ def complete_add(*, parsed_args=None, **kwargs):
     results = parallel((
         CMD['list services'],
         CMD['list bundles'],
-        CMD['list in bundle'] + (parsed_args.bundle,),
     ))
-    services, bundles, bundle_services = ( set(lines(r)) for r in results )
-    services -= bundle_services
-    bundles.remove(parsed_args.bundle)
+    services, bundles = ( set(lines(r)) for r in results )
+
+    bundle = parsed_args.bundle
+    if bundle in bundles:
+        bundle_services = set(lines(run(
+            CMD['list in bundle'] + (bundle,),
+            capture_output=True,
+            check=True,
+        )))
+        services -= bundle_services
+        bundles.remove(bundle)
+
     return services | bundles
 
 
