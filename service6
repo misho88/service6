@@ -394,11 +394,24 @@ def do_list(args):
         for bundle, output in zip(list_bundles, outputs)
     }
 
+    def get_bundle_state(services):
+        if services <= active_services:
+            return 'active'
+        if services.isdisjoint(active_services):
+            return 'dead'
+        return 'neutral'
+
+    bundle_states = {
+        bundle: get_bundle_state(services)
+        for bundle, services in bundles.items()
+    }
+
     claimed_services = {
         service
         for bundle_services in bundles.values()
         for service in bundle_services
     }
+    bundle_states[''] = get_bundle_state(list_services - claimed_services)
 
     result_items = hsorted(bundles.items()) + [
         ('', list_services - claimed_services),
@@ -423,8 +436,8 @@ def do_list(args):
             for a in subbundles
             if not any(bundles[a] < bundles[b] for b in subbundles)
         }
-        results[color(bundle)] = [
-            f'{color(subbundle)}   '
+        results[bundle] = [
+            f'{color(subbundle)} {SYMBOLS[bundle_states[subbundle]]}'
             for subbundle in hsorted(subbundles)
         ]
         printed_services = bundle_services.copy()
@@ -439,11 +452,14 @@ def do_list(args):
                 active = service in active_services
                 return SYMBOLS['active' if active else 'dead']
 
-        results[color(bundle)] += [
+        results[bundle] += [
             f"{service} {get_symbol(service)}"
             for service in hsorted(printed_services)
         ]
-    tabulate(results)
+    tabulate({
+        f'{SYMBOLS[bundle_states[bundle]]} {color(bundle)}': contents
+        for bundle, contents in results.items() }
+    )
 
 
 def do_start(args):
