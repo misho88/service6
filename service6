@@ -205,7 +205,8 @@ app = path.name
 
 bundle_commands = 'add', 'delete'
 service_commands = 'start', 'stop', 'restart'
-misc_commands = 'list', 'log', 'rebuild', 'help'
+list_commands = 'list', 'log', 'help'
+misc_commands = 'rebuild',
 
 descriptions = {
     'add': 'add services to a bundle',
@@ -222,6 +223,7 @@ descriptions = {
 completers = { cmd: globals().get(f'complete_{cmd}') for cmd in chain(
     bundle_commands,
     service_commands,
+    list_commands,
     misc_commands,
     ('pager', 'bundle'),
 ) }
@@ -275,15 +277,25 @@ for command in service_commands:
         help='the service(s) to operate on',
     ).completer = completers.get(command)
 
-for command in misc_commands:
+for command in list_commands:
     subparser = subparsers.add_parser(
         command,
         help=descriptions.get(command, 'miscellaneous command')
     )
     subparser.add_argument(
+        '--columns', '-c', type=int,
+        help='maximum number of columns to use (default: infer from terminal width)',
+    ).completer = completers.get(command)
+    subparser.add_argument(
         'items', nargs='*',
         help='services or bundles',
     ).completer = completers.get(command)
+
+for command in misc_commands:
+    subparser = subparsers.add_parser(
+        command,
+        help=descriptions.get(command, 'miscellaneous command')
+    )
 
 parser.add_argument(
     '--pager', '-p',
@@ -364,7 +376,11 @@ def tabulate(results):
         for items in results.values()
         for item in items
     ) + 3
-    n_cols = (terminal.width - leader_col_width) // data_col_width
+    if args.columns is None:
+        n_cols = (terminal.width - leader_col_width) // data_col_width
+    else:
+        n_cols = args.columns
+    n_cols = max(1, n_cols)
     for key, items in results.items():
         n_rows, rem = divmod(len(items), n_cols)
         n_rows += rem != 0
@@ -457,7 +473,7 @@ def do_list(args):
             for service in hsorted(printed_services)
         ]
     tabulate({
-        f'{SYMBOLS[bundle_states[bundle]]} {color(bundle)}': contents
+        f'{SYMBOLS[bundle_states[bundle]]} {terminal.bold_yellow(bundle)}': contents
         for bundle, contents in results.items() }
     )
 
