@@ -428,6 +428,7 @@ def do_list(args):
         for service in bundle_services
     }
     bundle_states[''] = get_bundle_state(list_services - claimed_services)
+    bundle_states['unknown'] = 'unknown'
 
     result_items = hsorted(bundles.items()) + [
         ('', list_services - claimed_services),
