@@ -2,10 +2,10 @@
 
 """servic6: a pretty wrapper around s6/s6-rc's utilities"""
 
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 __author__ = 'Mihail Georgiev'
 __email__ = 'misho88@gmail.com'
-__copyright__ = 'Copyright 2020, Mihail Georgiev'
+__copyright__ = 'Copyright 2021, Mihail Georgiev'
 __license__ = 'GNU GPLv3'
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -38,7 +38,7 @@ CMD = {
     'stop': SUDO + ('s6-rc', '-d', '-v', '2', 'change'),
     'add bundle': SUDO + ('s6-rc-bundle', 'add'),
     'delete bundle': SUDO + ('s6-rc-bundle', 'delete'),
-    'add to bundle': SUDO + ('s6-rc-bundle-update',  'add'),
+    'add to bundle': SUDO + ('s6-rc-bundle-update', 'add'),
     'delete from bundle': SUDO + ('s6-rc-bundle-update', 'delete'),
     'rebuild database': SUDO + ('/usr/share/libalpm/scripts/s6-rc-db-update-hook',),
 }
@@ -52,18 +52,23 @@ def get_set(cmd):
     ).stdout.decode().splitlines())
 
 
-def parallel(argvs):
+def parallel(argvs) -> list:  # type: ignore
     with ExitStack() as stack:
         procs = [
             stack.enter_context(Popen(argv, stdout=PIPE, stderr=PIPE))
             for argv in argvs
         ]
-        outputs = [ proc.stdout.read() for proc in procs ]
+        outputs = [ proc.stdout.read() for proc in procs ]  # type: ignore
         for i, proc in enumerate(procs):
             returncode = proc.wait()
             if returncode:
-                raise CalledProcessError(returncode, proc.args, outputs[i], proc.stderr.read())
-    return outputs
+                raise CalledProcessError(
+                    returncode,
+                    proc.args,
+                    outputs[i],
+                    proc.stderr.read(),  # type: ignore
+                )
+        return outputs
 
 
 def path_completer(**kwargs):
@@ -250,8 +255,10 @@ parser = ArgumentParser(
     epilog=epilog,
     formatter_class=RawDescriptionHelpFormatter,
 )
-subparsers = parser.add_subparsers(dest='command', required=True,
-    help='top-level command')
+subparsers = parser.add_subparsers(
+    dest='command', required=True,
+    help='top-level command'
+)
 
 for command in bundle_commands:
     subparser = subparsers.add_parser(
@@ -261,11 +268,11 @@ for command in bundle_commands:
     subparser.add_argument(
         '--bundle', '-b', default='default',
         help='the bundle to operate on',
-    ).completer = completers.get('bundle')
+    ).completer = completers.get('bundle')  # type: ignore
     subparser.add_argument(
         'services', nargs='+',
         help='the service(s) to modify the bundle with',
-    ).completer = completers.get(command)
+    ).completer = completers.get(command)  # type: ignore
 
 for command in service_commands:
     subparser = subparsers.add_parser(
@@ -275,7 +282,7 @@ for command in service_commands:
     subparser.add_argument(
         'services', nargs='+',
         help='the service(s) to operate on',
-    ).completer = completers.get(command)
+    ).completer = completers.get(command)  # type: ignore
 
 for command in list_commands:
     subparser = subparsers.add_parser(
@@ -285,11 +292,11 @@ for command in list_commands:
     subparser.add_argument(
         '--columns', '-c', type=int,
         help='maximum number of columns to use (default: infer from terminal width)',
-    ).completer = completers.get(command)
+    ).completer = completers.get(command)  # type: ignore
     subparser.add_argument(
         'items', nargs='*',
         help='services or bundles',
-    ).completer = completers.get(command)
+    ).completer = completers.get(command)  # type: ignore
 
 for command in misc_commands:
     subparser = subparsers.add_parser(
@@ -302,14 +309,14 @@ parser.add_argument(
     help='override the pager (e.g., less); same as setting PAGER environment '
          'variable (NOTE: use :n and :p to switch buffers in less when '
          'viewing multiple items)',
-).completer = completers['pager']
+).completer = completers['pager']  # type: ignore
 
 autocomplete(parser, default_completer=SuppressCompleter)
 args = parser.parse_args()
 
-from natsort import natsorted, ns
-from blessed import Terminal
-from sys import stderr
+from natsort import natsorted, ns  # noqa: E402
+from blessed import Terminal  # noqa: E402
+from sys import stderr  # noqa: E402
 
 terminal = Terminal()
 
@@ -462,7 +469,7 @@ def do_list(args):
             printed_services -= bundles[subbundle]
 
         if bundle == 'unknown':
-            def get_symbol(service):
+            def get_symbol(service):  # type: ignore
                 return SYMBOLS['unknown']
         else:
             def get_symbol(service):
