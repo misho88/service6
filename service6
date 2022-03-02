@@ -2,10 +2,10 @@
 
 """servic6: a pretty wrapper around s6/s6-rc's utilities"""
 
-__version__ = '0.2.0'
+__version__ = '0.3.0'
 __author__ = 'Mihail Georgiev'
 __email__ = 'misho88@gmail.com'
-__copyright__ = 'Copyright 2021, Mihail Georgiev'
+__copyright__ = 'Copyright 2022, Mihail Georgiev'
 __license__ = 'GNU GPLv3'
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
@@ -33,14 +33,12 @@ CMD = {
     'list bundles': LIST_SUDO + ('s6-rc-db', 'list', 'bundles'),
     'list services': LIST_SUDO + ('s6-rc-db', 'list', 'services'),
     'list active': LIST_SUDO + ('s6-rc', '-a', 'list'),
-    'list in bundle': LIST_SUDO + ('s6-rc-bundle-update', 'list'),
+    'list in bundle': LIST_SUDO + ('s6-rc-db', 'contents'),
     'start': SUDO + ('s6-rc', '-u', '-v', '2', 'change'),
     'stop': SUDO + ('s6-rc', '-d', '-v', '2', 'change'),
     'add bundle': SUDO + ('s6-rc-bundle', 'add'),
     'delete bundle': SUDO + ('s6-rc-bundle', 'delete'),
-    'add to bundle': SUDO + ('s6-rc-bundle-update', 'add'),
-    'delete from bundle': SUDO + ('s6-rc-bundle-update', 'delete'),
-    'rebuild database': SUDO + ('/usr/share/libalpm/scripts/s6-rc-db-update-hook',),
+    'rebuild database': SUDO + ('s6-db-reload',),
 }
 
 
@@ -201,7 +199,7 @@ def complete_log(**kwargs):
 complete_list = complete_restart
 
 
-def complete_help(**kargs):
+def complete_help(**kwargs):
     return DOC_NAMES
 
 
@@ -349,6 +347,10 @@ def sh_stdout(cmd):
 
 def sh_list(cmd):
     return hsorted(sh_stdout(cmd).splitlines())
+
+
+def sh_tuple(cmd):
+    return tuple(sh_stdout(cmd).splitlines())
 
 
 def leader_cell(text, width, position, shape):
@@ -500,9 +502,20 @@ def do_restart(args):
 
 
 def do_add(args):
-    bundles = sh_list(CMD['list bundles'])
-    cmd = CMD['add to bundle' if args.bundle in bundles else 'add bundle']
-    sh(cmd + (args.bundle,) + tuple(args.services), capture_output=False, echo=True)
+    bundles = lines(sh(CMD['list bundles']).stdout)
+    add_cmd = CMD['add bundle'] + (args.bundle,)
+    if args.bundle in bundles:
+        old_contents = set(lines(sh(CMD['list in bundle'] + (args.bundle,)).stdout))
+        new_contents = old_contents | set(args.services)
+        sh(CMD['delete bundle'] + (args.bundle,), capture_output=False, echo=True)
+        try:
+            sh(add_cmd + tuple(new_contents), capture_output=False, echo=True)
+        except CalledProcessError:
+            sh(add_cmd + tuple(old_contents), capture_output=False, echo=True)
+            raise
+    else:
+        sh(add_cmd + tuple(args.services), capture_output=False, echo=True)
+
 
 
 def do_delete(args):
@@ -519,10 +532,12 @@ def do_delete(args):
     results = parallel((CMD['list in bundle'] + (b,) for b in bundles))
     services = services.union(*( set(lines(r)) for r in results ))
 
-    delete_bundle = services == bundle_services
-    cmd = CMD['delete bundle' if delete_bundle else 'delete from bundle']
-    service_args = () if delete_bundle else tuple(services)
-    sh(cmd + (args.bundle,) + service_args, capture_output=False, echo=True)
+    new_services = bundle_services - services
+
+    sh(CMD['delete bundle'] + (args.bundle,), capture_output=False, echo=True)
+    if new_services:
+        add_cmd = CMD['add bundle'] + (args.bundle,)
+        sh(add_cmd + tuple(new_services), capture_output=False, echo=True)
 
 
 def do_help(args):
