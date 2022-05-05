@@ -13,7 +13,7 @@ from argcomplete import autocomplete, warn, SuppressCompleter
 from pathlib import Path
 from os import environ
 from subprocess import run, CalledProcessError, Popen, PIPE
-from shlex import split, join
+from shlex import split, join, quote
 from contextlib import ExitStack
 from functools import wraps
 from itertools import chain
@@ -29,6 +29,8 @@ SUDO = environ.get('SERVICE6_SUDO', '')
 LIST_SUDO = environ.get('SERVICE6_LIST_SUDO', SUDO)
 SUDO, LIST_SUDO = ( tuple(split(cmd)) for cmd in (SUDO, LIST_SUDO) )
 
+ADMINSVPATH = Path('/etc/s6/adminsv')
+
 CMD = {
     'list bundles': LIST_SUDO + ('s6-rc-db', 'list', 'bundles'),
     'list services': LIST_SUDO + ('s6-rc-db', 'list', 'services'),
@@ -39,6 +41,11 @@ CMD = {
     'add bundle': SUDO + ('s6-rc-bundle', 'add'),
     'delete bundle': SUDO + ('s6-rc-bundle', 'delete'),
     'rebuild database': SUDO + ('s6-db-reload',),
+    'mkdir': SUDO + ('mkdir', '-p'),
+    'shell': SUDO + ('sh', '-c'),
+    'touch': SUDO + ('touch',),
+    'rm': SUDO + ('rm',),
+    'rmdir': SUDO + ('rmdir',),
 }
 
 
@@ -314,7 +321,7 @@ args = parser.parse_args()
 
 from natsort import natsorted, ns  # noqa: E402
 from blessed import Terminal  # noqa: E402
-from sys import stderr  # noqa: E402
+from sys import stderr, exit  # noqa: E402
 
 terminal = Terminal()
 
@@ -516,6 +523,31 @@ def do_add(args):
     else:
         sh(add_cmd + tuple(args.services), capture_output=False, echo=True)
 
+    bundle_path = ADMINSVPATH / args.bundle
+    bundle_type_path = bundle_path / 'type'
+    bundle_contents_path = bundle_path / 'contents.d'
+
+    if not bundle_path.exists():
+        sh(CMD['mkdir'] + (str(bundle_path),), capture_output=False, echo=True)
+    elif not bundle_path.is_dir():
+        print(terminal.bold_red(f'not a directory: {bundle_path}'), file=stderr)
+        exit(1)
+
+    if not bundle_type_path.exists():
+        sh(CMD['shell'] + (f'echo bundle > {quote(str(bundle_type_path))}',), capture_output=False, echo=True)
+    elif bundle_type_path.read_bytes().strip() != b'bundle':
+        print(terminal.bold_red(f'not a bundle path: {bundle_path} (according to {bundle_type_path})'), file=stderr)
+        exit(1)
+
+    if not bundle_contents_path.exists():
+        sh(CMD['mkdir'] + (str(bundle_contents_path),), capture_output=False, echo=True)
+    elif not bundle_contents_path.is_dir():
+        print(terminal.bold_red(f'not a directory: {bundle_contents_path}'), file=stderr)
+        exit(1)
+
+    service_paths = (str(bundle_contents_path / service) for service in args.services)
+    for path in service_paths:
+        sh(CMD['touch'] + (path,), capture_output=False, echo=True)
 
 
 def do_delete(args):
@@ -529,6 +561,20 @@ def do_delete(args):
     bundles = services_or_bundles & all_bundles
     services = services_or_bundles - bundles
 
+    bundle_path = ADMINSVPATH / args.bundle
+    bundle_type_path = bundle_path / 'type'
+    bundle_contents_path = bundle_path / 'contents.d'
+
+    bundle_path_valid = bundle_path.is_dir() and bundle_type_path.read_bytes().strip() == b'bundle' and bundle_contents_path.is_dir()
+
+    if bundle_path_valid:
+        for file in bundle_contents_path.iterdir():
+            if file.name in services_or_bundles:
+                sh(CMD['rm'] + (str(file),), capture_output=False, echo=True)
+    else:
+        print(terminal.bold_orange(f'WARNING: {bundle_path} does not refer to a bundle'), file=stderr)
+
+
     results = parallel((CMD['list in bundle'] + (b,) for b in bundles))
     services = services.union(*( set(lines(r)) for r in results ))
 
@@ -538,6 +584,15 @@ def do_delete(args):
     if new_services:
         add_cmd = CMD['add bundle'] + (args.bundle,)
         sh(add_cmd + tuple(new_services), capture_output=False, echo=True)
+    if bundle_path_valid:
+        if args.bundle not in ('default', 'network', 'mount-filesystems', 'rc-local'):
+            for file in bundle_contents_path.iterdir():
+                sh(CMD['rm'] + (str(file),), capture_output=False, echo=True)
+            sh(CMD['rmdir'] + (str(bundle_contents_path),), capture_output=False, echo=True)
+            sh(CMD['rm'] + (str(bundle_type_path),), capture_output=False, echo=True)
+            sh(CMD['rmdir'] + (str(bundle_path),), capture_output=False, echo=True)
+        else:
+            print(terminal.bold_orange(f'WARNING: not deleting {bundle_path} because it may be important'), file=stderr)
 
 
 def do_help(args):
