@@ -22,6 +22,7 @@ from itertools import chain
 DOC_PATH = environ.get('SERVICE6_DOC_PATH', '/usr/share/doc/service6')
 DOC_NAMES = tuple(p.name for p in Path(DOC_PATH).iterdir())
 PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
+PAGER_HELP = environ.get('PAGER_HELP', 'less --quit-if-one-screen')
 LOG_PATH = Path(environ.get('SERVICE6_LOG_PATH', '/var/log'))
 LOG_OWNER = environ.get('SERVICE6_LOG_OWNER', 's6log')
 
@@ -629,7 +630,7 @@ def do_help(args):
         })
     else:
         doc_files = [ Path(DOC_PATH) / item for item in items ]
-        sh(split(PAGER) + hsorted(str(f) for f in doc_files), capture_output=False, echo=True)
+        sh(split(PAGER_HELP) + hsorted(str(f) for f in doc_files), capture_output=False, echo=True)
 
 
 def do_rebuild(args):
