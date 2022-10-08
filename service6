@@ -2,7 +2,7 @@
 
 """servic6: a pretty wrapper around s6/s6-rc's utilities"""
 
-__version__ = '0.3.0'
+__version__ = '0.3.1'
 __author__ = 'Mihail Georgiev'
 __email__ = 'misho88@gmail.com'
 __copyright__ = 'Copyright 2022, Mihail Georgiev'
@@ -19,6 +19,10 @@ from functools import wraps
 from itertools import chain
 
 
+def pack(*args):
+    return args
+
+
 DOC_PATH = environ.get('SERVICE6_DOC_PATH', '/usr/share/doc/service6')
 DOC_NAMES = tuple(p.name for p in Path(DOC_PATH).iterdir())
 PAGER = environ.get('PAGER', 'less ++G --quit-if-one-screen')
@@ -31,22 +35,26 @@ LIST_SUDO = environ.get('SERVICE6_LIST_SUDO', SUDO)
 SUDO, LIST_SUDO = ( tuple(split(cmd)) for cmd in (SUDO, LIST_SUDO) )
 
 ADMINSVPATH = Path('/etc/s6/adminsv')
+SERVICEPATH = Path('/run/service')
 
 CMD = {
-    'list bundles': LIST_SUDO + ('s6-rc-db', 'list', 'bundles'),
-    'list services': LIST_SUDO + ('s6-rc-db', 'list', 'services'),
-    'list active': LIST_SUDO + ('s6-rc', '-a', 'list'),
-    'list in bundle': LIST_SUDO + ('s6-rc-db', 'contents'),
-    'start': SUDO + ('s6-rc', '-u', '-v', '2', 'change'),
-    'stop': SUDO + ('s6-rc', '-d', '-v', '2', 'change'),
-    'add bundle': SUDO + ('s6-rc-bundle', 'add'),
-    'delete bundle': SUDO + ('s6-rc-bundle', 'delete'),
-    'rebuild database': SUDO + ('s6-db-reload',),
-    'mkdir': SUDO + ('mkdir', '-p'),
-    'shell': SUDO + ('sh', '-c'),
-    'touch': SUDO + ('touch',),
-    'rm': SUDO + ('rm',),
-    'rmdir': SUDO + ('rmdir',),
+    'list bundles'    : pack(*LIST_SUDO, 's6-rc-db', 'list', 'bundles'),
+    'list services'   : pack(*LIST_SUDO, 's6-rc-db', 'list', 'services'),
+    'list longruns'   : pack(*LIST_SUDO, 's6-rc-db', 'list', 'longruns'),
+    'list oneshots'   : pack(*LIST_SUDO, 's6-rc-db', 'list', 'oneshots'),
+    'list active'     : pack(*LIST_SUDO, 's6-rc', '-a', 'list'),
+    'list in bundle'  : pack(*LIST_SUDO, 's6-rc-db', 'contents'),
+    'pid'             : pack(*LIST_SUDO, 's6-svstat', '-o', 'pid'),
+    'start'           : pack(*SUDO, 's6-rc', '-u', '-v', '2', 'change'),
+    'stop'            : pack(*SUDO, 's6-rc', '-d', '-v', '2', 'change'),
+    'add bundle'      : pack(*SUDO, 's6-rc-bundle', 'add'),
+    'delete bundle'   : pack(*SUDO, 's6-rc-bundle', 'delete'),
+    'rebuild database': pack(*SUDO, 's6-db-reload',),
+    'mkdir'           : pack(*SUDO, 'mkdir', '-p'),
+    'shell'           : pack(*SUDO, 'sh', '-c'),
+    'touch'           : pack(*SUDO, 'touch',),
+    'rm'              : pack(*SUDO, 'rm',),
+    'rmdir'           : pack(*SUDO, 'rmdir',),
 }
 
 
@@ -410,11 +418,21 @@ def tabulate(results):
 
 
 def do_list(args):
-    outputs = parallel(CMD[t] for t in ('list bundles', 'list services', 'list active'))
-    all_bundles, all_services, active_services = (
+    outputs = parallel(
+        CMD[t]
+        for t in ('list bundles', 'list services', 'list longruns', 'list active')
+    )
+    all_bundles, all_services, longrun_services, active_services = (
         set(output.decode().splitlines())
         for output in outputs
     )
+
+    expected_on = longrun_services & active_services
+    outputs = parallel(
+        pack(*CMD['pid'], str(SERVICEPATH / service))
+        for service in expected_on
+    )
+    pids = { name: int(pid) for name, pid in zip(expected_on, outputs) }
 
     list_items = set(args.items)
     list_bundles = all_bundles & list_items if list_items else all_bundles
@@ -483,8 +501,11 @@ def do_list(args):
                 return SYMBOLS['unknown']
         else:
             def get_symbol(service):
-                active = service in active_services
-                return SYMBOLS['active' if active else 'dead']
+                if service not in active_services:
+                    return SYMBOLS['dead']
+                if service in pids and pids[service] < 0:
+                    return SYMBOLS['bad']
+                return SYMBOLS['active']
 
         results[bundle] += [
             f"{service} {get_symbol(service)}"
@@ -497,11 +518,11 @@ def do_list(args):
 
 
 def do_start(args):
-    sh(CMD['start'] + tuple(args.services), capture_output=False, echo=True)
+    sh(pack(*CMD['start'], *args.services), capture_output=False, echo=True)
 
 
 def do_stop(args):
-    sh(CMD['stop'] + tuple(args.services), capture_output=False, echo=True)
+    sh(pack(*CMD['stop'], *args.services), capture_output=False, echo=True)
 
 
 def do_restart(args):
@@ -511,50 +532,50 @@ def do_restart(args):
 
 def do_add(args):
     bundles = lines(sh(CMD['list bundles']).stdout)
-    add_cmd = CMD['add bundle'] + (args.bundle,)
+    add_cmd = pack(*CMD['add bundle'], args.bundle)
     if args.bundle in bundles:
-        old_contents = set(lines(sh(CMD['list in bundle'] + (args.bundle,)).stdout))
+        old_contents = set(lines(sh(pack(*CMD['list in bundle'], args.bundle)).stdout))
         new_contents = old_contents | set(args.services)
-        sh(CMD['delete bundle'] + (args.bundle,), capture_output=False, echo=True)
+        sh(pack(*CMD['delete bundle'], args.bundle), capture_output=False, echo=True)
         try:
-            sh(add_cmd + tuple(new_contents), capture_output=False, echo=True)
+            sh(pack(*add_cmd, *new_contents), capture_output=False, echo=True)
         except CalledProcessError:
-            sh(add_cmd + tuple(old_contents), capture_output=False, echo=True)
+            sh(pack(*add_cmd, *old_contents), capture_output=False, echo=True)
             raise
     else:
-        sh(add_cmd + tuple(args.services), capture_output=False, echo=True)
+        sh(pack(*add_cmd, *args.services), capture_output=False, echo=True)
 
     bundle_path = ADMINSVPATH / args.bundle
     bundle_type_path = bundle_path / 'type'
     bundle_contents_path = bundle_path / 'contents.d'
 
     if not bundle_path.exists():
-        sh(CMD['mkdir'] + (str(bundle_path),), capture_output=False, echo=True)
+        sh(pack(*CMD['mkdir'], str(bundle_path)), capture_output=False, echo=True)
     elif not bundle_path.is_dir():
         print(terminal.bold_red(f'not a directory: {bundle_path}'), file=stderr)
         exit(1)
 
     if not bundle_type_path.exists():
-        sh(CMD['shell'] + (f'echo bundle > {quote(str(bundle_type_path))}',), capture_output=False, echo=True)
+        sh(pack(*CMD['shell'], f'echo bundle > {quote(str(bundle_type_path))}'), capture_output=False, echo=True)
     elif bundle_type_path.read_bytes().strip() != b'bundle':
         print(terminal.bold_red(f'not a bundle path: {bundle_path} (according to {bundle_type_path})'), file=stderr)
         exit(1)
 
     if not bundle_contents_path.exists():
-        sh(CMD['mkdir'] + (str(bundle_contents_path),), capture_output=False, echo=True)
+        sh(pack(*CMD['mkdir'], str(bundle_contents_path)), capture_output=False, echo=True)
     elif not bundle_contents_path.is_dir():
         print(terminal.bold_red(f'not a directory: {bundle_contents_path}'), file=stderr)
         exit(1)
 
-    service_paths = (str(bundle_contents_path / service) for service in args.services)
+    service_paths = (bundle_contents_path / service for service in args.services)
     for path in service_paths:
-        sh(CMD['touch'] + (path,), capture_output=False, echo=True)
+        sh(pack(*CMD['touch'], str(path)), capture_output=False, echo=True)
 
 
 def do_delete(args):
     results = parallel((
         CMD['list bundles'],
-        CMD['list in bundle'] + (args.bundle,),
+        pack(*CMD['list in bundle'], args.bundle),
     ))
     all_bundles, bundle_services = ( set(lines(r)) for r in results )
 
@@ -575,23 +596,22 @@ def do_delete(args):
     else:
         print(terminal.bold_orange(f'WARNING: {bundle_path} does not refer to a bundle'), file=stderr)
 
-
     results = parallel((CMD['list in bundle'] + (b,) for b in bundles))
     services = services.union(*( set(lines(r)) for r in results ))
 
     new_services = bundle_services - services
 
-    sh(CMD['delete bundle'] + (args.bundle,), capture_output=False, echo=True)
+    sh(pack(*CMD['delete bundle'], args.bundle), capture_output=False, echo=True)
     if new_services:
-        add_cmd = CMD['add bundle'] + (args.bundle,)
-        sh(add_cmd + tuple(new_services), capture_output=False, echo=True)
+        add_cmd = pack(*CMD['add bundle'], args.bundle)
+        sh(pack(*add_cmd, *new_services), capture_output=False, echo=True)
     if bundle_path_valid:
         if args.bundle not in ('default', 'network', 'mount-filesystems', 'rc-local'):
             for file in bundle_contents_path.iterdir():
                 sh(CMD['rm'] + (str(file),), capture_output=False, echo=True)
-            sh(CMD['rmdir'] + (str(bundle_contents_path),), capture_output=False, echo=True)
-            sh(CMD['rm'] + (str(bundle_type_path),), capture_output=False, echo=True)
-            sh(CMD['rmdir'] + (str(bundle_path),), capture_output=False, echo=True)
+            sh(pack(*CMD['rmdir'], str(bundle_contents_path)), capture_output=False, echo=True)
+            sh(pack(*CMD['rm'   ], str(bundle_type_path    )), capture_output=False, echo=True)
+            sh(pack(*CMD['rmdir'], str(bundle_path         )), capture_output=False, echo=True)
         else:
             print(terminal.bold_orange(f'WARNING: not deleting {bundle_path} because it may be important'), file=stderr)
 
