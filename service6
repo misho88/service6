@@ -39,6 +39,7 @@ CMD = {
     'list oneshots'   : (*LIST_SUDO, 's6-rc-db', 'list', 'oneshots'),
     'list active'     : (*LIST_SUDO, 's6-rc', '-a', 'list'),
     'list in bundle'  : (*LIST_SUDO, 's6-rc-db', 'contents'),
+    'list live'       : ('s6', 'live', 'status', '--with-essentials'),
     'pid'             : (*LIST_SUDO, 's6-svstat', '-o', 'pid'),
     'start'           : (*SUDO, 's6-rc', '-u', '-v', '2', 'change'),
     'stop'            : (*SUDO, 's6-rc', '-d', '-v', '2', 'change'),
@@ -412,17 +413,28 @@ def tabulate(results):
             print()
 
 
+def process_live_services(services):
+    srvs, live = set(), set()
+    for srv_status in services:
+        srv, status = srv_status.split('/')
+        srvs.add(srv)
+        if status == 'up':
+            live.add(srv)
+    return srvs, live
+
+
 def do_list(args):
     outputs = parallel(
         CMD[t]
-        for t in ('list bundles', 'list services', 'list longruns', 'list active')
+        for t in ('list live', 'list bundles', 'list longruns')
     )
-    all_bundles, all_services, longrun_services, active_services = (
+    all_services, live_services = process_live_services(outputs[0].decode().splitlines())
+    all_bundles, longrun_services = (
         set(output.decode().splitlines())
-        for output in outputs
+        for output in outputs[1:]
     )
 
-    expected_on = longrun_services & active_services
+    expected_on = longrun_services & live_services
     outputs = parallel(
         (*CMD['pid'], str(SERVICEPATH / service))
         for service in expected_on
@@ -441,9 +453,9 @@ def do_list(args):
     }
 
     def get_bundle_state(services):
-        if services <= active_services:
+        if services <= live_services:
             return 'active'
-        if services.isdisjoint(active_services):
+        if services.isdisjoint(live_services):
             return 'dead'
         return 'neutral'
 
@@ -496,7 +508,7 @@ def do_list(args):
                 return SYMBOLS['unknown']
         else:
             def get_symbol(service):
-                if service not in active_services:
+                if service not in live_services:
                     return SYMBOLS['dead']
                 if service in pids and pids[service] < 0:
                     return SYMBOLS['bad']
@@ -582,7 +594,11 @@ def do_delete(args):
     bundle_type_path = bundle_path / 'type'
     bundle_contents_path = bundle_path / 'contents.d'
 
-    bundle_path_valid = bundle_path.is_dir() and bundle_type_path.read_bytes().strip() == b'bundle' and bundle_contents_path.is_dir()
+    bundle_path_valid = (
+        bundle_path.is_dir()
+        and bundle_type_path.read_bytes().strip() == b'bundle'  # noqa: W503
+        and bundle_contents_path.is_dir()  # noqa: W503
+    )
 
     if bundle_path_valid:
         for file in bundle_contents_path.iterdir():
