@@ -41,8 +41,11 @@ CMD = {
     'list in bundle'  : (*LIST_SUDO, 's6-rc-db', 'contents'),
     'list live'       : ('s6', 'live', 'status', '--with-essentials'),
     'pid'             : (*LIST_SUDO, 's6-svstat', '-o', 'pid'),
-    'start'           : (*SUDO, 's6-rc', '-u', '-v', '2', 'change'),
-    'stop'            : (*SUDO, 's6-rc', '-d', '-v', '2', 'change'),
+    # 'start'           : (*SUDO, 's6-rc', '-u', '-v', '2', 'change'),
+    # 'stop'            : (*SUDO, 's6-rc', '-d', '-v', '2', 'change'),
+    'start'           : (*SUDO, 's6', '--verbosity=2', 'live', 'start'),
+    'stop'            : (*SUDO, 's6', '--verbosity=2', 'live', 'stop'),
+    'restart'         : (*SUDO, 's6', '--verbosity=2', 'live', 'restart'),
     'add bundle'      : (*SUDO, 's6-rc-bundle', 'add'),
     'delete bundle'   : (*SUDO, 's6-rc-bundle', 'delete'),
     'rebuild database': (*SUDO, 's6-db-reload',),
@@ -533,8 +536,7 @@ def do_stop(args):
 
 
 def do_restart(args):
-    do_stop(args)
-    do_start(args)
+    sh((*CMD['restart'], *args.services), capture_output=False, echo=True)
 
 
 def do_add(args):
