@@ -17,6 +17,9 @@ doc/%: s6/doc/%.html
 doc/%: s6-rc/doc/%.html
 	$(BROWSER) -dump $< > $@
 
+doc/%: s6-frontend/doc/%.html
+	$(BROWSER) -dump $< > $@
+
 install: all
 	install -d ${DESTDIR}/usr/bin
 	install $(SERVICE6) ${DESTDIR}/usr/bin

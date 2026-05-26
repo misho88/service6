@@ -4,3 +4,6 @@
 [submodule "s6-rc"]
 	path = s6-rc
 	url = https://github.com/skarnet/s6-rc.git
+[submodule "s6-frontend"]
+	path = s6-frontend
+	url = https://github.com/skarnet/s6-frontend.git
