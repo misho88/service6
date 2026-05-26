@@ -2,7 +2,7 @@
 
 """servic6: a pretty wrapper around s6/s6-rc's utilities"""
 
-__version__ = '0.3.1'
+__version__ = '0.4.1'
 __author__ = 'Mihail Georgiev'
 __email__ = 'misho88@gmail.com'
 __copyright__ = 'Copyright 2026, Mihail Georgiev'
@@ -39,13 +39,9 @@ CMD = {
     'list oneshots'   : (*LIST_SUDO, 's6-rc-db', 'list', 'oneshots'),
     'list active'     : (*LIST_SUDO, 's6-rc', '-a', 'list'),
     'list in bundle'  : (*LIST_SUDO, 's6-rc-db', 'contents'),
-    'list live'       : ('s6', 'live', 'status', '--with-essentials'),
     'pid'             : (*LIST_SUDO, 's6-svstat', '-o', 'pid'),
     # 'start'           : (*SUDO, 's6-rc', '-u', '-v', '2', 'change'),
     # 'stop'            : (*SUDO, 's6-rc', '-d', '-v', '2', 'change'),
-    'start'           : (*SUDO, 's6', '--verbosity=2', 'live', 'start'),
-    'stop'            : (*SUDO, 's6', '--verbosity=2', 'live', 'stop'),
-    'restart'         : (*SUDO, 's6', '--verbosity=2', 'live', 'restart'),
     'add bundle'      : (*SUDO, 's6-rc-bundle', 'add'),
     'delete bundle'   : (*SUDO, 's6-rc-bundle', 'delete'),
     'rebuild database': (*SUDO, 's6-db-reload',),
@@ -54,6 +50,16 @@ CMD = {
     'touch'           : (*SUDO, 'touch',),
     'rm'              : (*SUDO, 'rm',),
     'rmdir'           : (*SUDO, 'rmdir',),
+    'start'           : (*SUDO, 's6', '--verbosity=2', 'live', 'start'),
+    'stop'            : (*SUDO, 's6', '--verbosity=2', 'live', 'stop'),
+    'restart'         : (*SUDO, 's6', '--verbosity=2', 'live', 'restart'),
+    'live status'     : ('s6', 'live', 'status', '--with-essentials'),
+    'set enable'      : (*SUDO, 's6', '--verbosity=2', 'set', 'enable'),
+    'set disable'     : (*SUDO, 's6', '--verbosity=2', 'set', 'disable'),
+    'set check'       : (*SUDO, 's6', '--verbosity=2', 'set', 'check'),
+    'set commit'      : (*SUDO, 's6', '--verbosity=2', 'set', 'commit'),
+    'live install'    : (*SUDO, 's6', '--verbosity=2', 'live', 'install'),
+    'repo sync'       : (*SUDO, 's6', '--verbosity=2', 'repo', 'sync'),
 }
 
 
@@ -121,17 +127,26 @@ def complete_add(*, parsed_args=None, **kwargs):
     ))
     services, bundles = ( set(lines(r)) for r in results )
 
-    bundle = parsed_args.bundle
-    if bundle in bundles:
-        bundle_services = set(lines(run(
-            CMD['list in bundle'] + (bundle,),
-            capture_output=True,
-            check=True,
-        )))
-        services -= bundle_services
-        bundles.remove(bundle)
+    arg_bundle = getattr(parsed_args, 'bundle', 'default')
+    if arg_bundle not in bundles:  # this is a new bundle
+        return services | bundles
 
-    return services | bundles
+    included_services = set(lines(run(
+        (*CMD['list in bundle'], arg_bundle),
+        capture_output=True,
+        check=True,
+    ).stdout))
+
+    results = parallel(( (*CMD['list in bundle'], b) for b in bundles ))
+    bundles_services = ( set(lines(r)) for r in results )
+
+    included_bundles = {
+        bundle
+        for bundle, bundle_services in zip(bundles, bundles_services)
+        if bundle_services <= included_services
+    }
+
+    return services - included_services | bundles - included_bundles
 
 
 @with_completion_failed_message
@@ -152,6 +167,10 @@ def complete_delete(*, parsed_args=None, **kwargs):
         if srvs <= bundle_services
     }
     return bundle_services | bundles
+
+
+complete_enable = complete_add
+complete_disable = complete_delete
 
 
 @with_completion_failed_message
@@ -222,15 +241,17 @@ path = Path(__file__)
 app = path.name
 
 bundle_commands = 'add', 'delete'
-service_commands = 'start', 'stop', 'restart'
+service_commands = 'start', 'stop', 'restart', 'enable', 'disable'
 list_commands = 'list', 'log', 'help'
-misc_commands = 'rebuild',
+misc_commands = ()  #'rebuild',
 
 descriptions = {
-    'add': 'add services to a bundle',
-    'delete': 'delete services from a bundle',
+    'add': 'add services to a bundle (be careful)',
+    'delete': 'delete services from a bundle (be careful)',
     'start': 'start services',
     'stop': 'stop services',
+    'enable': 'enable services',
+    'disable': 'disable services',
     'restart': 'stop services and start them again',
     'log': 'view the logs for a service',
     'list': 'show information about bundles and services',
@@ -273,20 +294,6 @@ subparsers = parser.add_subparsers(
     help='top-level command'
 )
 
-for command in bundle_commands:
-    subparser = subparsers.add_parser(
-        command,
-        help=descriptions.get(command, 'bundle command'),
-    )
-    subparser.add_argument(
-        '--bundle', '-b', default='default',
-        help='the bundle to operate on',
-    ).completer = completers.get('bundle')  # type: ignore
-    subparser.add_argument(
-        'services', nargs='+',
-        help='the service(s) to modify the bundle with',
-    ).completer = completers.get(command)  # type: ignore
-
 for command in service_commands:
     subparser = subparsers.add_parser(
         command,
@@ -309,6 +316,20 @@ for command in list_commands:
     subparser.add_argument(
         'items', nargs='*',
         help='services or bundles',
+    ).completer = completers.get(command)  # type: ignore
+
+for command in bundle_commands:
+    subparser = subparsers.add_parser(
+        command,
+        help=descriptions.get(command, 'bundle command'),
+    )
+    subparser.add_argument(
+        '--bundle', '-b', default='default',
+        help='the bundle to operate on',
+    ).completer = completers.get('bundle')  # type: ignore
+    subparser.add_argument(
+        'services', nargs='+',
+        help='the service(s) to modify the bundle with',
     ).completer = completers.get(command)  # type: ignore
 
 for command in misc_commands:
@@ -429,7 +450,7 @@ def process_live_services(services):
 def do_list(args):
     outputs = parallel(
         CMD[t]
-        for t in ('list live', 'list bundles', 'list longruns')
+        for t in ('live status', 'list bundles', 'list longruns')
     )
     all_services, live_services = process_live_services(outputs[0].decode().splitlines())
     all_bundles, longrun_services = (
@@ -479,6 +500,14 @@ def do_list(args):
         ('', list_services - claimed_services),
         ('unknown', list_unknown),
     ]
+    default_idx = next((
+        i
+        for i, (name, _) in enumerate(result_items)
+        if name == 'default'
+    ), None)
+    if default_idx is not None:
+        result_items.insert(0, result_items.pop(default_idx))
+
     results = {}
     for bundle, bundle_services in result_items:
         if not bundle_services:
@@ -521,8 +550,15 @@ def do_list(args):
             f"{service} {get_symbol(service)}"
             for service in hsorted(printed_services)
         ]
+
+    def heading(bundle):
+        heading = terminal.bold_yellow(bundle)
+        if bundle == 'default':
+            heading = terminal.underline(heading)
+        return heading
+
     tabulate({
-        f'{SYMBOLS[bundle_states[bundle]]} {terminal.bold_yellow(bundle)}': contents
+        f'{SYMBOLS[bundle_states[bundle]]} {heading(bundle)}': contents
         for bundle, contents in results.items() }
     )
 
@@ -537,6 +573,22 @@ def do_stop(args):
 
 def do_restart(args):
     sh((*CMD['restart'], *args.services), capture_output=False, echo=True)
+
+
+def live_sync():
+    sh(CMD['set check'], capture_output=False, echo=True)
+    sh(CMD['set commit'], capture_output=False, echo=True)
+    sh(CMD['live install'], capture_output=False, echo=True)
+
+
+def do_enable(args):
+    sh((*CMD['set enable'], *args.services), capture_output=False, echo=True)
+    live_sync()
+
+
+def do_disable(args):
+    sh((*CMD['set disable'], *args.services), capture_output=False, echo=True)
+    live_sync()
 
 
 def do_add(args):
@@ -579,6 +631,8 @@ def do_add(args):
     service_paths = (bundle_contents_path / service for service in args.services)
     for path in service_paths:
         sh((*CMD['touch'], str(path)), capture_output=False, echo=True)
+
+    sh(CMD['repo sync'], capture_output=False, echo=True)
 
 
 def do_delete(args):
@@ -627,6 +681,8 @@ def do_delete(args):
             sh((*CMD['rmdir'], str(bundle_path         )), capture_output=False, echo=True)
         else:
             print(terminal.bold_orange(f'WARNING: not deleting {bundle_path} because it may be important'), file=stderr)
+
+    sh(CMD['repo sync'], capture_output=False, echo=True)
 
 
 def do_help(args):
